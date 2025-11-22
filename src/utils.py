@@ -52,3 +52,15 @@ def normalize(v: npt.NDArray) -> npt.NDArray:
 
     norms = np.linalg.norm(v, axis=-1, keepdims=True)
     return v / norms
+
+def clamp(val: npt.ArrayLike) -> npt.ArrayLike:
+    """Clamp dot products to [-1, 1] for acos stability.
+
+    Args:
+        val (npt.ArrayLike): Dot product results to be clamped.
+
+    Returns:
+        npt.ArrayLike: Clamped values.
+    """
+
+    return np.clip(val, -1.0, 1.0)
