@@ -140,6 +140,9 @@ class AnkleFrame:
             "q1": q1,
             "q2": q2,
             "q3": q3,
+            "e1": e1,
+            "e2": e2,
+            "e3": e3,
             "o_T": o_T_G,
             "o_C": o_C_G
         }
