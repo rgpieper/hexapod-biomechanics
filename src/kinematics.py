@@ -118,7 +118,7 @@ class AnkleFrame:
 
         # inversion/eversion:
         # rotation about e2: angle between tibia/fibula z-axis and calcaneus y-axis
-        dot_beta = clamp(np.sum(e1 * e3), axis=1) # (F,)
+        dot_beta = clamp(np.sum(e1 * e3, axis=1)) # (F,)
         beta = self.side * (np.pi/2 - np.arccos(dot_beta)) # assume remains witin [-pi/2, pi/2] (F,)
 
         # internal/external rotation
