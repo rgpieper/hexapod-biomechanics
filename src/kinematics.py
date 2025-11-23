@@ -2,7 +2,7 @@
 from typing import Dict
 import numpy as np
 import numpy.typing as npt
-from utils import normalize, rigid_transform, clamp
+from src.utils import normalize, rigid_transform, clamp
 
 class AnkleFrame:
     """Ankle kinematics solver.
