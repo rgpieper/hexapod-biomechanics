@@ -48,7 +48,7 @@ def animate_ankle_kinematics(
     assert fs_data >= fs_animation, f"Invalid speed & animation rate: data rate is {fs_data:.01f} Hz but {fs_animation:.01f} Hz is required."
 
     frame_step = fs_data / fs_animation
-    ani_f_idx = np.round(np.arange(t[0], t.shape[0], frame_step)).astype(int)
+    ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
 
     fig = plt.figure(figsize=(16,9), facecolor='white')
     gs = gridspec.GridSpec(3, 2, width_ratios=[1, 2])
