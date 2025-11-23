@@ -20,7 +20,7 @@ def rigid_transform(base_points: npt.NDArray, dynamic_points: npt.NDArray) -> np
     H_dynamic = dynamic_points - centroid_dynamic[:, np.newaxis, :] # (F, N, 3) - (F, 1, 3) -> (F, N, 3)
     H = H_dynamic.transpose(0,2,1) @ H_base # frame-wise covariance matrix, (F, 3, N) @ (N, 3) -> (F, 3, 3)
 
-    U, _, Vh = np.linalg.svg(H) # (F, 3, 3) -> U(F, 3, 3), S(F, 3), Vh(F, 3, 3)
+    U, _, Vh = np.linalg.svd(H) # (F, 3, 3) -> U(F, 3, 3), S(F, 3), Vh(F, 3, 3)
     V = Vh.transpose(0, 2, 1) # Vh is V.T, need to transpose
     R = V @ U.transpose(0, 2, 1) # rotation matrix (F, 3, 3), via R = V @ U.T
 
