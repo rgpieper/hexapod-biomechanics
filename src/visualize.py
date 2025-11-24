@@ -22,7 +22,7 @@ def animate_ankle_kinematics(
         speed: float = 1.0,
         animation_fps: int = 30,
         filename: Optional[str] = None
-) -> None:
+) -> animation.FuncAnimation:
     """Creates animation of the ankle joint coordinate system with corresponding kinematics.
 
     Args:
@@ -41,6 +41,9 @@ def animate_ankle_kinematics(
         speed (float, optional): Playback speed scale. Defaults to 1.0.
         animation_fps (int, optional): Animation frames per second. Defaults to 30.
         filename (Optional[str], optional): Filename/path to save animation. Defaults to None.
+
+    Returns:
+        animation.FuncAnimation: Kinematics animation object for viewing.
     """
     
     fs_data = 1 / np.mean(np.diff(t))
@@ -160,5 +163,5 @@ def animate_ankle_kinematics(
         print(f"Saving to {filename}")
         writer = 'pillow' if filename.endswith('.gif') else 'ffmpeg'
         anim.save(filename, writer=writer, fps=animation_fps)
-    else:
-        plt.show()
+    
+    return anim
