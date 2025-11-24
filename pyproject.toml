@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "c3d>=0.6.0",
     "ipykernel>=7.1.0",
+    "ipympl>=0.9.8",
     "ipython>=9.7.0",
     "matplotlib>=3.10.7",
     "numpy>=2.3.5",
