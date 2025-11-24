@@ -53,6 +53,10 @@ def animate_ankle_kinematics(
     frame_step = fs_data / fs_animation
     ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
 
+    alpha = np.degrees(alpha)
+    beta = np.degrees(beta)
+    gamma = np.degrees(gamma)
+
     fig = plt.figure(figsize=(16,9), facecolor='white')
     gs = gridspec.GridSpec(3, 2, width_ratios=[1, 2])
 
@@ -163,5 +167,7 @@ def animate_ankle_kinematics(
         print(f"Saving to {filename}")
         writer = 'pillow' if filename.endswith('.gif') else 'ffmpeg'
         anim.save(filename, writer=writer, fps=animation_fps)
+
+    plt.close()
     
     return anim
