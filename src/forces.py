@@ -18,13 +18,6 @@ class HexKistler:
 
         h_marker = 12 # mm, marker height (distance from marker to force plate surface)
 
-        self.sensors_K = np.array([ # sensor locations (homogeneous) in Kistler's frame
-            [self.a, self.b, 0, 1],
-            [-self.a, self.b, 0, 1],
-            [-self.a, -self.b, 0, 1],
-            [self.a, -self.b, 0, 1]
-        ])
-
         distances = pdist(self.cluster_hex_base)
         pairs = list(combinations(range(self.cluster_hex_base.shape[0]), 2))
         origin = np.nanmean(self.cluster_hex_base[pairs[np.argmax(distances)], :], axis=0)
@@ -34,6 +27,8 @@ class HexKistler:
         self.T_KG_neut = np.eye(4) # assume Kistler axes are parallel to global axes
         self.T_KG_neut[:3, 3] = origin
         self.T_KG_neut[(1,2), (1,2)] = -1 # flip y and z axes orientation
+
+        self.T_KG = np.eye(4)[np.newaxis, ...]
 
     def process_forces(
             self,
@@ -53,9 +48,9 @@ class HexKistler:
 
         # Kistler transformation
         T_H_move = rigid_transform(self.cluster_hex_base, cluster_hex) # hexapod movement from base to dynamic (n_frames, 4, 4)
-        T_KG = T_H_move @ self.T_KG_neut # dynamic Kistler coordinate system (n_frames, 4, 4)
-        R_KG = T_KG[:, :3, :3] # just rotation (n_frames, 3, 3)
-        o_KG = T_KG[:, :3, 3] # translation (Kistler origin in global frame) (n_frames, 3)
+        self.T_KG = T_H_move @ self.T_KG_neut # dynamic Kistler coordinate system (n_frames, 4, 4)
+        R_KG = self.T_KG[:, :3, :3] # just rotation (n_frames, 3, 3)
+        o_KG = self.T_KG[:, :3, 3] # translation (Kistler origin in global frame) (n_frames, 3)
 
         # resultant forces in Kistler frame
         Fx_K = (-fx12) + (-fx34)
@@ -91,7 +86,7 @@ class HexKistler:
         
         # transform COP to global frame
         COP_K = np.column_stack([COPx_K, COPy_K, COPz_K, np.ones(n_frames)])
-        COP = (T_KG @ COP_K[..., np.newaxis]).squeeze()[:, :3] # (n_frames, 4, 4)@(n_frames, 4, 1) -> (n_frames, 4, 1) -> (n_frames, 3)
+        COP = (self.T_KG @ COP_K[..., np.newaxis]).squeeze()[:, :3] # (n_frames, 4, 4)@(n_frames, 4, 1) -> (n_frames, 4, 1) -> (n_frames, 3)
 
         # determine free moment (about Kistler z at COP)
         M_free_scalar = Mz_K - (Fy_K * COPx_K) + (Fx_K * COPy_K)
@@ -105,9 +100,23 @@ class HexKistler:
             "moment_free": M_free,
             "moment_free_scalar": M_free_scalar
         }
+    
+    def track_plate(self) -> npt.NDArray:
 
+        corners_K = np.array([ # surface corner locations (homogeneous) in Kistler's frame
+            [250, 300, self.a_z0, 1],
+            [-250, 300, self.a_z0, 1],
+            [-250, -300, self.a_z0, 1],
+            [250, -300, self.a_z0, 1]
+        ]) # (n_corners, 4)
+        corners = (self.T_KG @ corners_K.T)[:, :3, :].transpose(0, 2, 1) # (n_frames, 4, 4) @ (4, n_corners) -> (n_frames, 4, n_corners) -> (n_frames, n_corners, 3)
 
+        sensors_K = np.array([ # sensor locations (homogeneous) in Kistler's frame
+            [self.a, self.b, 0, 1],
+            [-self.a, self.b, 0, 1],
+            [-self.a, -self.b, 0, 1],
+            [self.a, -self.b, 0, 1]
+        ]) # (n_sensors, 4)
+        sensors = (self.T_KG @ sensors_K.T)[:, :3, :].transpose(0, 2, 1) # (n_frames, 4, 4) @ (4, n_sensors) -> (n_frames, 4, n_sensors) -> (n_frames, n_sensors, 3)
 
-
-
-         
+        return corners, sensors
