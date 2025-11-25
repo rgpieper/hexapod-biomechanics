@@ -78,8 +78,21 @@ class AnkleFrame:
         self.T_CG_neut[:3, 2] = z_C_G
         self.T_CG_neut[:3, 3] = o_C_G
 
-        self.T_TG = np.empty(0)
-        self.T_CG = np.empty(0)
+        self.T_TG = np.eye(4)[np.newaxis, ...]
+        self.T_CG = np.eye(4)[np.newaxis, ...]
+        self.kinematics = {
+            "alpha": np.empty(0),
+            "beta": np.empty(0),
+            "gamma": np.empty(0),
+            "q1": np.empty(0),
+            "q2": np.empty(0),
+            "q3": np.empty(0),
+            "e1": np.empty(0),
+            "e2": np.empty(0),
+            "e3": np.empty(0),
+            "o_T": np.empty(0),
+            "o_C": np.empty(0)
+        }
 
     def compute_kinematics(self, cluster_S: npt.NDArray, cluster_F: npt.NDArray) -> Dict[str, npt.NDArray]:
         """Compute 6-DOF ankle joint kinematics relative to neutral static configuration.
