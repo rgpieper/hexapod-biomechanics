@@ -52,7 +52,7 @@ class C3DMan:
         print()
         print("---------- POINT CHANNELS -----------")
         for idx in self.point_map.index:
-            print(idx)
+            print(f"\'{idx}\'")
         print()
         pd.set_option('display.max_rows', default_rows)
         
