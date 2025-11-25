@@ -28,7 +28,7 @@ class HexKistler:
         distances = pdist(self.cluster_hex_base)
         pairs = list(combinations(range(self.cluster_hex_base.shape[0]), 2))
         origin = np.nanmean(self.cluster_hex_base[pairs[np.argmax(distances)], :], axis=0)
-        origin[2] -= (h_marker + self.a_z0) # Kistler origin is below force plate surface
+        origin[2] -= (h_marker + (-self.a_z0)) # Kistler origin is below force plate surface (a_z0 defined negative)
 
         # TODO: implement a Kistler calibration / localization protocol
         self.T_KG_neut = np.eye(4) # assume Kistler axes are parallel to global axes
