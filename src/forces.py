@@ -76,11 +76,6 @@ class HexKistler:
         M_G_kist = (R_KG @ M_K[..., np.newaxis]).squeeze() # (n_frames, 3, 3)@(n_frames, 3, 1) -> (n_frames, 3, 1) -> (n_frames, 3)
         M = M_G_kist + np.cross(o_KG, F) # moments represented at global origin
 
-        # determine free moment (about Kistler z at COP)
-        M_free_scalar = Mz_K - (Fy_K * COPx_K) + (Fx_K * COPy_K)
-        plate_normal = (R_KG @ np.array([0, 0, 1])).squeeze()
-        M_free = plate_normal * M_free_scalar[:, np.newaxis] # (n_frames, 3) @ (n_frames, 1)
-
         # moments represented at the center of Kistler surface (above origin)
         Mx_surf = Mx_K + (Fy_K * self.a_z0) # a_z0 defined as negative
         My_surf = My_K - (Fx_K * self.a_z0)
@@ -97,6 +92,11 @@ class HexKistler:
         # transform COP to global frame
         COP_K = np.column_stack([COPx_K, COPy_K, COPz_K, np.ones(n_frames)])
         COP = (T_KG @ COP_K[..., np.newaxis]).squeeze()[:, :3] # (n_frames, 4, 4)@(n_frames, 4, 1) -> (n_frames, 4, 1) -> (n_frames, 3)
+
+        # determine free moment (about Kistler z at COP)
+        M_free_scalar = Mz_K - (Fy_K * COPx_K) + (Fx_K * COPy_K)
+        plate_normal = (R_KG @ np.array([0, 0, 1])).squeeze()
+        M_free = plate_normal * M_free_scalar[:, np.newaxis] # (n_frames, 3) @ (n_frames, 1)
 
         return {
             "force": F,
