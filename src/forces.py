@@ -74,7 +74,7 @@ class HexKistler:
         # rotate to global frame and move to origin
         M_K = np.column_stack([Mx_K, My_K, Mz_K])
         M_G_kist = (R_KG @ M_K[..., np.newaxis]).squeeze() # (n_frames, 3, 3)@(n_frames, 3, 1) -> (n_frames, 3, 1) -> (n_frames, 3)
-        M = M_G_kist * np.cross(o_KG, F) # moments represented at global origin
+        M = M_G_kist + np.cross(o_KG, F) # moments represented at global origin
 
         # determine free moment (about Kistler z at COP)
         M_free_scalar = Mz_K - (Fy_K * COPx_K) + (Fx_K * COPy_K)
