@@ -102,7 +102,18 @@ class AnkleFrame:
             cluster_F (npt.NDArray): Foot cluster trajectory (n_frames, n_markers, 3)
 
         Returns:
-            Dict[str, npt.NDArray]: Kinematics including 'alpha', 'beta', 'gamma', 'q1', 'q2', 'q3', 'o_T', 'o_C' (all (n_frames,))
+            Dict[str, npt.NDArray]: Kinematics including:
+                'alpha' (npt.NDArray): Dorsiflexion/plantarflexion angle (n_frames,)
+                'beta' (npt.NDArray): Inversion/eversion angle (n_frames,)
+                'gamma' (npt.NDArray): Internal/external rotation angle (n_frames,)
+                'q1' (npt.NDArray): Medial/lateral shift (n_frames,)
+                'q2' (npt.NDArray): Anterior/posterior shift (n_frames,)
+                'q3' (npt.NDArray): Vertical shift (n_frames,)
+                'e1' (npt.NDArray): Dorsiflexion/plantarflexion axis (n_frames,3)
+                'e2' (npt.NDArray): Inversion/eversion axis (n_frames,3)
+                'e3' (npt.NDArray): Internal/external rotation axis (n_frames,3)
+                'o_T' (npt.NDArray): Tibia/fibula frame origin (n_frames,3)
+                'o_C' (npt.NDArray): Calcaneus frame origin (n_frames,3)
         """
 
         T_S_move = rigid_transform(self.cluster_S_neut, cluster_S) # shank movement from base to dynamic
