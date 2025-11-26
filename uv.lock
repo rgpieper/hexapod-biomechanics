@@ -345,7 +345,7 @@ wheels = [
 [[package]]
 name = "hexapod-biomechanics"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "c3d" },
     { name = "hexapod-inertial-force-removal" },
