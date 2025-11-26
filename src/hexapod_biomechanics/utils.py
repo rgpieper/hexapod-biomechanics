@@ -2,6 +2,8 @@
 from typing import Tuple, Dict, Optional
 import numpy as np
 import numpy.typing as npt
+from scipy.signal import savgol_filter
+from scipy.spatial.transform import Rotation, RotationSpline
 
 def rigid_transform(base_points: npt.NDArray, dynamic_points: npt.NDArray) -> npt.NDArray:
     """Compute transformation of a dynamic rigid body relative to a base configuration.
@@ -134,3 +136,53 @@ def inv_rodrigues(R: npt.NDArray, tol: float = 1e-6) -> Tuple[float, Optional[np
     n = normalize(n) # rotation axis direction (3,)
 
     return theta, n
+
+def differentiate_rotation(
+        time: npt.NDArray,
+        R: npt.NDArray,
+        window_duration: float = 0.05, # seconds, ~20-30Hz cutoff
+        filt_poly: int = 4
+    ) -> Tuple[npt.NDArray, npt.NDArray]:
+    """Compute 3D angular velocity and acceleration from rotation matrix timeseries.
+
+    Args:
+        time (npt.NDArray): Time vector (n_frames,)
+        R (npt.NDArray): Series of rotation matrices describing body orientation in global frame (n_frames,3,3)
+        window_duration (float, optional): Time length of filter, dictating cutoff frequency (seconds). Defaults to 0.05.
+        filt_poly (int, optional): Filter polynomial order. Defaults to 4.
+
+    Returns:
+        Tuple[npt.NDArray, npt.NDArray]:
+            omega (npt.NDArray): 3D angular velocity represented in body frame (n_frames,3)
+            alpha (npt.NDArray): 3D angular acceleration represented in body frame (n_frames,3)
+    """
+    
+    rot = Rotation.from_matrix(R)
+    spline = RotationSpline(time, rot)
+    omega_raw = spline(time, order=1) # angular velocity in the body frame
+
+    dt = np.mean(np.diff(time)) # sample period
+    fs = 1 / dt # sample frequency
+
+    # filtered frequencies is tied to time-length of filter window
+    # compute stable filter window according to time length and sample frequency
+    filt_window = int(fs * window_duration)
+    filt_window = filt_window if filt_window % 2 != 0 else filt_window + 1
+
+    omega = savgol_filter(
+        omega_raw,
+        window_length=filt_window,
+        polyorder=filt_poly,
+        deriv=0,
+        axis=0
+    )
+    alpha = savgol_filter(
+        omega_raw,
+        window_length=filt_window,
+        polyorder=filt_poly,
+        deriv=1,
+        delta=dt,
+        axis=0
+    )
+
+    return omega, alpha
