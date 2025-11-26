@@ -1,5 +1,5 @@
 
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 import numpy as np
 import numpy.typing as npt
 
@@ -100,3 +100,37 @@ def axis_difference(target_axis: Tuple[npt.NDArray, npt.NDArray], actual_axis: T
         'angle_diff': angle_diff,
         'offset_diff': offset_diff # difference between actual reference point/origin and target axis
     }
+
+def inv_rodrigues(R: npt.NDArray, tol: float = 1e-6) -> Tuple[float, Optional[npt.NDArray]]:
+    """Determine axis and magnitude of rotation represented by a rotation matrix.
+
+    Args:
+        R (npt.NDArray): Rotation matrix (3,3)
+        tol (float, optional): Minimum theta for which axis will be computed. Defaults to 1e-6.
+
+    Returns:
+        Tuple[npt.ArrayLike, Optional[npt.NDArray]]:
+            theta (float): Magnitude of rotation about axis (radians)
+            n (Optional[npt.NDArray]): Axis of rotation (3,)
+    """
+
+    # trace(R) = 1 + 2*cos(theta)
+    theta = np.arccos(clamp((np.trace(R) - 1) / 2.0)) # rotation angle (rad)
+    if np.abs(theta) < tol: # rotation too small to compute axis
+        return theta, None
+
+    # Rodrigues' formula computes rotation matrix for rotation 'theta' about axis 'n'
+    # axis of rotation encoded in skew-symmetric matrix S = [[0, -nz, ny], [nz, 0, -nx], [-ny, nx, 0]]
+    # R = I + sin(theta)*S + (1 - cos(theta))*S^2
+    # R.T = I + sin(theta)*(-S) + (1 - cos(theta))*S^2
+    # R - R.T = 2*sin(theta)*S
+    # S = [[0, -nz, ny], [nz, 0, -nx], [-ny, nx, 0]] = (R - R.T) / 2*sin(theta)
+    n_skew = np.array([
+        R[2, 1] - R[1, 2], # nx * sin(theta)
+        R[0, 2] - R[2, 0], # ny * sin(theta)
+        R[1, 0] - R[0, 1] # nz * sin(theta)
+    ])
+    n = n_skew / (2 * np.sin(theta))
+    n = normalize(n) # rotation axis direction (3,)
+
+    return theta, n

@@ -4,7 +4,7 @@ from itertools import combinations
 import numpy as np
 import numpy.typing as npt
 from scipy.spatial.distance import pdist
-from hexapod_biomechanics.utils import rigid_transform, clamp, normalize
+from hexapod_biomechanics.utils import rigid_transform, clamp, normalize, inv_rodrigues
 
 class HexKistler:
     """Hexapod-Kistler ground reaction force solver.
@@ -180,23 +180,13 @@ class HexKistler:
         R = T[:3, :3] # rotation matrix (3,3)
         x = T[:3, 3] # translation (3,)
 
-        theta = np.arccos(clamp((np.trace(R) - 1) / 2.0)) # rotation angle (rad)
-        if np.abs(theta) < 1e-4: # rotation too small to compute axis
-            return None
-        
-        # Rodrigues' formula computes rotation matrix for rotation 'theta' about axis 'n'
-        # axis of rotation encoded in skew-symmetric matrix S = [[0, -nz, ny], [nz, 0, -nx], [-ny, nx, 0]]
-        # R = I + sin(theta)*S + (1 - cos(theta))*S^2
-        # R.T = I + sin(theta)*(-S) + (1 - cos(theta))*S^2
-        # R - R.T = 2*sin(theta)*S
-        # S = [[0, -nz, ny], [nz, 0, -nx], [-ny, nx, 0]] = (R - R.T) / 2*sin(theta)
-        n_skew = np.array([
-            R[2, 1] - R[1, 2], # nx * sin(theta)
-            R[0, 2] - R[2, 0], # ny * sin(theta)
-            R[1, 0] - R[0, 1] # nz * sin(theta)
-        ])
-        n = n_skew / (2 * np.sin(theta))
-        n = normalize(n) # rotation axis direction (3,)
+        theta, n = inv_rodrigues(R, tol=1e-4)
+        if n is None:
+            return {
+                "origin": None,
+                "direction": n,
+                "angle": theta
+            }
 
         # tranfromation: p_end = T*p_start_hom = R*p_start + x
         # if p_start on axis of rotation: p_end = p_start + (d*n) with scalar d
