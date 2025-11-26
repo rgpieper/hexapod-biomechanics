@@ -162,7 +162,7 @@ class HexKistler:
         """Locate perturbation axis of rotation according to terminal perturbation location of hexapod markers.
 
         Args:
-            cluster_hex_pert (npt.NDArray): Terminal perturbed hexapod marker location (n_frames,n_markers,3) or (n_markers,3). Multiple provided frames will be averaged.
+            cluster_hex_pert (npt.NDArray): Terminal perturbed hexapod marker location(s) (n_frames,n_markers,3) or (n_markers,3). Multiple provided frames will be averaged.
 
         Returns:
             Optional[Dict[str, npt.NDArray]]: Rotational axis parameters, including:
@@ -205,7 +205,7 @@ class HexKistler:
         x_ortho = x - (d * n) # translation orthogonal to axis of rotation
         # (I - R) is singular because infinite points on axis of rotation solve this equation
         # use least squares to find point closest to global origin
-        p_near_orig, _, _, _ = np.linalg.lstsq(np.eye(3) - R, x_ortho, r_cond=None)
+        p_near_orig, _, _, _ = np.linalg.lstsq(np.eye(3) - R, x_ortho, rcond=None)
 
         p_to_K = self.T_KG_neut[:3, 3] - p_near_orig # vector from ref point closest to origin and neutral Kistler origin
         slide = np.dot(p_to_K, n) # project vector onto rotational axis
@@ -216,10 +216,3 @@ class HexKistler:
             "direction": n,
             "angle": theta
         }
-
-
-
-
-
-
-
