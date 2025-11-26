@@ -1,10 +1,10 @@
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 from itertools import combinations
 import numpy as np
 import numpy.typing as npt
 from scipy.spatial.distance import pdist
-from hexapod_biomechanics.utils import rigid_transform
+from hexapod_biomechanics.utils import rigid_transform, clamp, normalize
 
 class HexKistler:
     """Hexapod-Kistler ground reaction force solver.
@@ -157,3 +157,69 @@ class HexKistler:
         sensors = (self.T_KG @ sensors_K.T)[:, :3, :].transpose(0, 2, 1) # (n_frames, 4, 4) @ (4, n_sensors) -> (n_frames, 4, n_sensors) -> (n_frames, n_sensors, 3)
 
         return corners, sensors
+    
+    def locate_rot_axis(self, cluster_hex_pert: npt.NDArray) -> Optional[Dict[str, npt.NDArray]]:
+        """Locate perturbation axis of rotation according to terminal perturbation location of hexapod markers.
+
+        Args:
+            cluster_hex_pert (npt.NDArray): Terminal perturbed hexapod marker location (n_frames,n_markers,3) or (n_markers,3). Multiple provided frames will be averaged.
+
+        Returns:
+            Optional[Dict[str, npt.NDArray]]: Rotational axis parameters, including:
+                'origin' (npt.NDArray): Axis reference point nearest to base/neutral Kistler origin (3,)
+                'direction' (npt.NDArray): Unit vector axis of rotation (3,)
+                'angle' (float): Rotation magnitude (radians)
+        """
+
+        if len(cluster_hex_pert.shape) == 3: # frame dimension included (n_frames,n_markers,3)
+            cluster_hex_pert = np.nanmean(cluster_hex_pert, axis=0, keepdims=True) # (n_markers,3)
+        else: # frame dimension excluded (n_markers,3)
+            cluster_hex_pert = cluster_hex_pert[np.newaxis, ...] # (1,n_markers,3)
+
+        T = rigid_transform(self.cluster_hex_base, cluster_hex_pert).squeeze() # hexapod movement from base to perturbed position (4,4)
+        R = T[:3, :3] # rotation matrix (3,3)
+        x = T[:3, 3] # translation (3,)
+
+        theta = np.arccos(clamp((np.trace(R) - 1) / 2.0)) # rotation angle (rad)
+        if np.abs(theta) < 1e-4: # rotation too small to compute axis
+            return None
+        
+        # Rodrigues' formula computes rotation matrix for rotation 'theta' about axis 'n'
+        # axis of rotation encoded in skew-symmetric matrix S = [[0, -nz, ny], [nz, 0, -nx], [-ny, nx, 0]]
+        # R = I + sin(theta)*S + (1 - cos(theta))*S^2
+        # R.T = I + sin(theta)*(-S) + (1 - cos(theta))*S^2
+        # R - R.T = 2*sin(theta)*S
+        # S = [[0, -nz, ny], [nz, 0, -nx], [-ny, nx, 0]] = (R - R.T) / 2*sin(theta)
+        n_skew = np.array([
+            R[2, 1] - R[1, 2], # nx * sin(theta)
+            R[0, 2] - R[2, 0], # ny * sin(theta)
+            R[1, 0] - R[0, 1] # nz * sin(theta)
+        ])
+        n = n_skew / (2 * np.sin(theta))
+        n = normalize(n) # rotation axis direction (3,)
+
+        # tranfromation: p_end = T*p_start_hom = R*p_start + x
+        # if p_start on axis of rotation: p_end = p_start + (d*n) with scalar d
+        d = np.dot(x, n) # component of translation parallel to axis of rotation
+        # p + (d*n) = R*p + x --> (I - R)*p = x - (d*n)
+        x_ortho = x - (d * n) # translation orthogonal to axis of rotation
+        # (I - R) is singular because infinite points on axis of rotation solve this equation
+        # use least squares to find point closest to global origin
+        p_near_orig, _, _, _ = np.linalg.lstsq(np.eye(3) - R, x_ortho, r_cond=None)
+
+        p_to_K = self.T_KG_neut[:3, 3] - p_near_orig # vector from ref point closest to origin and neutral Kistler origin
+        slide = np.dot(p_to_K, n) # project vector onto rotational axis
+        p_near_K = p_near_orig + (slide * n) # slide reference point along rotation axis to near neutral Kistler origin
+
+        return {
+            "origin": p_near_K,
+            "direction": n,
+            "angle": theta
+        }
+
+
+
+
+
+
+
