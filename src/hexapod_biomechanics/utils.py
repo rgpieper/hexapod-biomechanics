@@ -1,4 +1,5 @@
 
+from typing import Tuple, Dict
 import numpy as np
 import numpy.typing as npt
 
@@ -63,3 +64,39 @@ def clamp(val: npt.ArrayLike) -> npt.ArrayLike:
     """
 
     return np.clip(val, -1.0, 1.0)
+
+def axis_difference(target_axis: Tuple[npt.NDArray, npt.NDArray], actual_axis: Tuple[npt.NDArray, npt.NDArray]) -> Dict[str, npt.ArrayLike]:
+    """Compute orientation and offset difference between two axes.
+
+    Individual axis parameters (shape (3,)) can be passed to return single (scalar) differences.
+    Frame-wise axis parameters (shape (n_frames,3)) will return frame-wise differences (shape (n_frames,)).
+
+    Args:
+        target_axis (Tuple[npt.NDArray, npt.NDArray]): Target axis parameters: (origin, direction).
+        actual_axis (Tuple[npt.NDArray, npt.NDArray]): Actual axis parameters: (origin, direction). Offset will be computed between actual origin and target axis.
+
+    Returns:
+        Dict[str, npt.ArrayLike]: _description_
+    """
+
+    p_t = target_axis[0] # (n_frames, 3) or (3,)
+    v_t = normalize(target_axis[1]) # (n_frames, 3) or (3,)
+
+    p_a = actual_axis[0] # (n_frames, 3) or (3,)
+    v_a = normalize(actual_axis[1]) # (n_frames, 3) or (3,)
+
+    # orientation difference (angle between axes):
+    # cos(phi) = v1 . v2
+    dot_prod = np.abs(np.sum(v_t * v_a, axis=-1)) # (n_frames,) or scalar
+    angle_diff = np.arccos(clamp(dot_prod)) # radians (n_frames,) or scalar
+
+    # offset difference: distance from actual axis reference/origin to target axis
+    # (Note the distinction between target and reference axis.)
+    # d = norm( (p_a - p_t) x v_t ) / norm(v_t) (norm(v_t) = 1)
+    target_to_actual = p_a - p_t # (n_frames,3) or (3,)
+    offset_diff = np.linalg.norm(np.cross(target_to_actual, v_t)) # (n_frames,) or scalar
+
+    return {
+        'angle_diff': angle_diff,
+        'offset_diff': offset_diff # difference between actual reference point/origin and target axis
+    }
