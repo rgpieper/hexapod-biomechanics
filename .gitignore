@@ -9,7 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+# Specific data and model weights
 data/
 models/
+
+# Scratchpad notebook for demo
+notebooks/scratchpad.ipynb
 
 .DS_Store
