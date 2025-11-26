@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "c3d>=0.6.0",
+    "hexapod-inertial-force-removal",
     "ipykernel>=7.1.0",
     "ipympl>=0.9.8",
     "ipython>=9.7.0",
@@ -14,3 +15,6 @@ dependencies = [
     "pandas>=2.3.3",
     "scipy>=1.16.3",
 ]
+
+[tool.uv.sources]
+hexapod-inertial-force-removal = { git = "ssh://git@github.com/rgpieper/hexapod-inertial-force-removal.git" }
