@@ -21,15 +21,14 @@ def rigid_transform(base_points: npt.NDArray, dynamic_points: npt.NDArray) -> np
     H = H_dynamic.transpose(0,2,1) @ H_base # frame-wise covariance matrix, (F, 3, N) @ (N, 3) -> (F, 3, 3)
 
     U, _, Vh = np.linalg.svd(H) # (F, 3, 3) -> U(F, 3, 3), S(F, 3), Vh(F, 3, 3)
-    V = Vh.transpose(0, 2, 1) # Vh is V.T, need to transpose
-    R = V @ U.transpose(0, 2, 1) # rotation matrix (F, 3, 3), via R = V @ U.T
+    R = U @ Vh # rotation matrix (F, 3, 3), via R = V @ U.T
 
     # check / correct for reflection
     det = np.linalg.det(R) # (F,)
     reflect_mask = det < 0
     if np.any(reflect_mask):
-        V[reflect_mask, :, 2] *= -1 # multiply third column by -1
-        R = V @ U.transpose(0, 2, 1) # recompute R for all frames
+        U[reflect_mask, :, 2] *= -1 # multiply third column by -1
+        R = U @ Vh # recompute R for all frames
 
     x = centroid_dynamic - (R @ centroid_base) # translation, (F, 3) - ((F, 3, 3) @ (3,)) -> (F, 3)
 
