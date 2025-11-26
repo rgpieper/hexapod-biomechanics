@@ -196,6 +196,28 @@ def animate_grf(
         moment_scale: float = 0.05,
         filename: Optional[str] = None
 ) -> animation.FuncAnimation:
+    """Creates animation of the ground reaction force in context with body and hexapod position.
+
+    Args:
+        t (npt.NDArray): Time vector (n_frames,)
+        forces (npt.NDArray): Component forces acting on the subject in global frame (n_frames,3)
+        COP (npt.NDArray): Center of pressure coordinates in global frame (n_frames,3)
+        moment_free (npt.NDArray): Free moment (twist, frictional) at COP in global frame (n_frames,3)
+        corners (npt.NDArray): Coordinate trajectories of the Kistler corners (n_frames,n_corners,3)
+        sensors (npt.NDArray): Coordinate trajectories of the Kistler sensors (n_frames,n_sensors,3)
+        kist_origin_base (npt.NDArray): Origin of the Kistler coordinate system in the base/static configuration (3,)
+        side (int): Ankle side (1: right, -1: left)
+        markers (npt.NDArray): Marker trajectories to incude in animation (n_frames,n_markers,3)
+        speed (float, optional): Playback speed scale. Defaults to 1.0.
+        animation_fps (int, optional): Animation frames per second. Defaults to 30.
+        stance_thresh (float, optional): Vertical (z) force at which subject is in stance on Hexapod, when COP/GRF will be plotted. Defaults to 18.0.
+        force_scale (float, optional): Length of force vector relative to magnitude, in mm/N. Defaults to 0.5.
+        moment_scale (float, optional): Length of free moment vector relative to magnitude, in mm/N. Defaults to 0.05.
+        filename (Optional[str], optional): Filename/path to save animation. Defaults to None.
+
+    Returns:
+        animation.FuncAnimation: Kinematics animation object for viewing.
+    """
     
     fs_data = 1 / np.mean(np.diff(t))
     fs_animation = animation_fps / speed
