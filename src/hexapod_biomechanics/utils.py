@@ -140,7 +140,7 @@ def inv_rodrigues(R: npt.NDArray, tol: float = 1e-6) -> Tuple[float, Optional[np
 def differentiate_rotation(
         time: npt.NDArray,
         R: npt.NDArray,
-        filt_window_duration: float = 0.05, # seconds, ~20-30Hz cutoff
+        filt_window: int = 11,
         filt_poly: int = 4
     ) -> Tuple[npt.NDArray, npt.NDArray]:
     """Compute 3D angular velocity and acceleration from rotation matrix timeseries.
@@ -162,12 +162,6 @@ def differentiate_rotation(
     omega_raw = spline(time, order=1) # angular velocity in the body frame
 
     dt = np.mean(np.diff(time)) # sample period
-    fs = 1 / dt # sample frequency
-
-    # filtered frequencies is tied to time-length of filter window
-    # compute stable filter window according to time length and sample frequency
-    filt_window = int(fs * filt_window_duration)
-    filt_window = filt_window if filt_window % 2 != 0 else filt_window + 1
 
     omega = savgol_filter(
         omega_raw,
