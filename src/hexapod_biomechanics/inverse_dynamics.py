@@ -50,10 +50,10 @@ class AnkleID:
         )
 
         x_ajc = filt(o_T, deriv=0) # anatomical joint center: intermalleolar point (n_frames,3)
+        omega_F, alpha_F = differentiate_rotation(t, R_F, filt_window, filt_poly) # foot rotations in local foot frame (n_frames,3)
         if COM_F is not None: # compute foot kinematics
             x_com = filt(COM_F, deriv=0) # center of motion position (n_frames,3)
             a_com = filt(COM_F, deriv=2) # center of motion acceleration (n_frames,3)
-            omega_F, alpha_F = differentiate_rotation(t, R_F, filt_window, filt_poly) # foot rotations in local foot frame (n_frames,3)
 
         F_grf = filt(grf_force, deriv=0)
         M_grf_origin = filt(grf_moment_origin, deriv=0)
@@ -103,5 +103,7 @@ class AnkleID:
             "M_e3": M_e3,
             "F_e1": F_e1,
             "F_e2": F_e2,
-            "F_e3": F_e3
+            "F_e3": F_e3,
+            "omega_F": omega_F,
+            "alpha_F": alpha_F
         }
