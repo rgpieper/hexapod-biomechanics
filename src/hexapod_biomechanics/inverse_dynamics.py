@@ -33,22 +33,17 @@ class AnkleID:
         # compute stable filter window according to time length and sample frequency
         filt_window = int(fs * filt_window_duration)
         filt_window = filt_window if filt_window % 2 != 0 else filt_window + 1
-        
-        ajc = o_T # anatomical joint center: intermalleolar point
 
-        v_COM = savgol_filter(
-            COM_F,
+        filt = lambda tjct, deriv : savgol_filter(
+            x=tjct,
             window_length=filt_window,
             polyorder=filt_poly,
-            deriv=1,
+            deriv=deriv,
             delta=dt,
             axis=0
         )
-        a_COM = savgol_filter(
-            COM_F,
-            window_length=filt_window,
-            polyorder=filt_poly,
-            deriv=2,
-            delta=dt,
-            axis=0
-        )
+
+        x_ajc = filt(o_T, deriv=0) # anatomical joint center: intermalleolar point (n_frames,3)
+        x_com = filt(COM_F, deriv=0) # center of motion position (n_frames,3)
+        v_com = filt(COM_F, deriv=1) # center of motion velocity (n_frames,3)
+        a_com = filt(COM_F, deriv=2) # center of motion acceleration (n_frames,3)
