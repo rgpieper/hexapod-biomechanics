@@ -53,6 +53,7 @@ def normalize(v: npt.NDArray) -> npt.NDArray:
     """
 
     norms = np.linalg.norm(v, axis=-1, keepdims=True)
+    norms[norms < 1e-6] = 1.0
     return v / norms
 
 def clamp(val: npt.ArrayLike) -> npt.ArrayLike:
