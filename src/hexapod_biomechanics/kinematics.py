@@ -99,13 +99,25 @@ class AnkleFrame:
         T_SCS[:3, 1] = y_SCS
         T_SCS[:3, 2] = z_SCS
         T_SCS[:3, 3] = o_SCS
+        R_SCS = T_SCS[:3, :3] # just the rotation
         L_seg = np.linalg.norm(mid_met - o_SCS) # foot segment length (scalar): anatomical joint center to midpoint of metatarsals
         assert sex in ["m", "f"], f"Invalid sex: {sex}. Choose \"m\" or \"f\"."
         if sex == "m":
             COM_SCS = np.array([0.382, -0.151, 0.026])*L_seg
+            Inorm_SCS = np.real((np.array([
+                [17, 13, 8j],
+                [13, 37, 0],
+                [8j, 0, 36]
+            ]) * L_seg)**2) # segment-mass-normalized inertia matrix: r_ij = (1/L_seg)*sqrt(I_ij/m_seg)
         elif sex == "f":
             COM_SCS = np.array([0.270, -0.218, 0.039])*L_seg
-        self.COM_C = (np.linalg.inv(self.T_CG_neut) @ T_SCS @ np.append(COM_SCS, 1))[:3] # foot COM represented in calcaneus frame
+            Inorm_SCS = np.real((np.array([
+                [17, 10j, 6],
+                [10j, 36, 4j],
+                [6, 4j, 35]
+            ]) * L_seg)**2) # segment-mass-normalized inertia matrix: r_ij = (1/L_seg)*sqrt(I_ij/m_seg)
+        self.COM_C = (np.linalg.inv(self.T_CG_neut) @ T_SCS @ np.append(COM_SCS, 1))[:3] # foot COM represented in calcaneus frame (fixed to calc. frame) (3,)
+        self.Inorm_C = R_SCS @ Inorm_SCS @ R_SCS.T # rotate inertia matrix to calcaneus frame (3,3)
 
         self.T_TG = np.eye(4)[np.newaxis, ...]
         self.T_CG = np.eye(4)[np.newaxis, ...]
@@ -119,8 +131,9 @@ class AnkleFrame:
             "e1": np.empty(0),
             "e2": np.empty(0),
             "e3": np.empty(0),
-            "o_T": np.empty(0),
-            "o_C": np.empty(0)
+            "o_ajc": np.empty(0),
+            "R_F": np.empty(0),
+            "COM_F": np.empty(0)
         }
 
     def compute_kinematics(self,

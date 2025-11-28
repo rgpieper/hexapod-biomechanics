@@ -8,14 +8,16 @@ from scipy.constants import g
 
 class AnkleID:
 
-    def __init__(self):
+    def __init__(self, body_mass: float = 0.0, Inorm: npt.NDArray = np.eye(3), sex: str = "m"):
 
-        self.m_F = 1 # mass of foot (kg)
+        # inertial properties estimated according to Dumas et al 2006 (doi:10.1016/j.jbiomech.2006.02.013)
+        assert sex in ["m", "f"], f"Invalid sex: {sex}. Choose \"m\" or \"f\"."
+        if sex == "m":
+            self.m_F = 0.012 * body_mass # mass of foot (kg)
+        elif sex == "f":
+            self.m_F = 0.010 * body_mass
         
-        Ixx = 1
-        Iyy = 1
-        Izz = 1
-        self.I_F = np.diag([Ixx, Iyy, Izz]) # foot inertia matrix in local foot frame
+        self.I_F =  self.m_F * Inorm # foot inertia matrix in local foot (calcaneus) frame
 
     def compute_dynamics(
             self,
