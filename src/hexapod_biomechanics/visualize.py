@@ -15,8 +15,6 @@ def animate_ankle_kinematics(
         e1: npt.NDArray,
         e2: npt.NDArray,
         e3: npt.NDArray,
-        o_T: npt.NDArray,
-        o_C: npt.NDArray,
         T_T: npt.NDArray,
         T_C: npt.NDArray,
         markers: npt.NDArray,
@@ -35,8 +33,6 @@ def animate_ankle_kinematics(
         e1 (npt.NDArray): Dorsiflexion/plantarflexion ankle axis (n_frames,3)
         e2 (npt.NDArray): Inversion/eversion ankle axis (n_frames,3)
         e3 (npt.NDArray): Internal/external rotation ankle axis (n_frames,3)
-        o_T (npt.NDArray): Tibia/fibula frame origin (n_frames,3)
-        o_C (npt.NDArray): Calcaneus frame origin (n_frames,3)
         T_T (npt.NDArray): Tibia/fibula frame representation (n_frames,4,4)
         T_C (npt.NDArray): Calcaneus frame representation (n_frames,4,4)
         markers (npt.NDArray): Marker trajectories to include in animation (n_frames, n_markers, 3)
@@ -145,13 +141,15 @@ def animate_ankle_kinematics(
         for q in quivers:
             q.remove()
         quivers.clear()
-        add_vec(o_T[frame_i], T_T[frame_i, :3, 0], 'gray', lw=1, length=60) # tibia/fibula x-axis
-        add_vec(o_T[frame_i], T_T[frame_i, :3, 1], 'gray', lw=1, length=60) # tibia/fibula y-axis
-        add_vec(o_T[frame_i], e1[frame_i], 'blue', lw=3, length=100) # e1 (alpha: dorsiflexion)
-        add_vec(o_C[frame_i], T_C[frame_i, :3, 0], 'gray', lw=1, length=60) # calcaneus x-axis
-        add_vec(o_C[frame_i], T_C[frame_i, :3, 2], 'gray', lw=1, length=60) # calcaneus z-axis
-        add_vec(o_C[frame_i], e3[frame_i], 'green', lw=3, length=100) # e3 (gamma: internal rotation)
-        add_vec((o_T[frame_i]+o_C[frame_i])/2, e2[frame_i], 'red', lw=3, length=100) # e2 at average of bone axes (beta: inversion)
+        o_T = T_T[frame_i, :3, 3]
+        o_C = T_T[frame_i, :3, 3]
+        add_vec(o_T, T_T[frame_i, :3, 0], 'gray', lw=1, length=60) # tibia/fibula x-axis
+        add_vec(o_T, T_T[frame_i, :3, 1], 'gray', lw=1, length=60) # tibia/fibula y-axis
+        add_vec(o_T, e1[frame_i], 'blue', lw=3, length=100) # e1 (alpha: dorsiflexion)
+        add_vec(o_C, T_C[frame_i, :3, 0], 'gray', lw=1, length=60) # calcaneus x-axis
+        add_vec(o_C, T_C[frame_i, :3, 2], 'gray', lw=1, length=60) # calcaneus z-axis
+        add_vec(o_C, e3[frame_i], 'green', lw=3, length=100) # e3 (gamma: internal rotation)
+        add_vec((o_T+o_C)/2, e2[frame_i], 'red', lw=3, length=100) # e2 at average of bone axes (beta: inversion)
 
         l_alpha.set_data(t[:frame_i+1], alpha[:frame_i+1])
         l_beta.set_data(t[:frame_i+1], beta[:frame_i+1])

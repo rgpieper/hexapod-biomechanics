@@ -112,8 +112,8 @@ class AnkleFrame:
                 'e1' (npt.NDArray): Dorsiflexion/plantarflexion axis (n_frames,3)
                 'e2' (npt.NDArray): Inversion/eversion axis (n_frames,3)
                 'e3' (npt.NDArray): Internal/external rotation axis (n_frames,3)
-                'o_T' (npt.NDArray): Tibia/fibula frame origin (n_frames,3)
-                'o_C' (npt.NDArray): Calcaneus frame origin (n_frames,3)
+                'o_ajc' (npt.NDArray): Ankle joint center: intermalleolar point (tibia/fibula frame origin) (n_frames,3)
+                'R_F' (npt.NDArray): Foot orientation (rotation matrix tracking calcaneus frame) (n_frames,3,3)
         """
 
         T_S_move = rigid_transform(self.cluster_S_neut, cluster_S) # shank movement from base to dynamic
@@ -167,8 +167,8 @@ class AnkleFrame:
             "e1": e1,
             "e2": e2,
             "e3": e3,
-            "o_T": o_T_G,
-            "o_C": o_C_G
+            "o_ajc": o_T_G,
+            "R_F": self.T_CG[:, :3, :3]
         }
 
         return self.kinematics

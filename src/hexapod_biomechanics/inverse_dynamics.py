@@ -25,7 +25,7 @@ class AnkleID:
             e1: npt.NDArray,
             e2: npt.NDArray,
             e3: npt.NDArray,
-            o_T: npt.NDArray,
+            o_ajc: npt.NDArray,
             R_F: npt.NDArray,
             COM_F: Optional[npt.NDArray] = None,
             filt_window_duration: float = 0.05, # seconds, ~20-30Hz cutoff,
@@ -49,7 +49,7 @@ class AnkleID:
             axis=0
         )
 
-        x_ajc = filt(o_T, deriv=0) # anatomical joint center: intermalleolar point (n_frames,3)
+        x_ajc = filt(o_ajc, deriv=0) # anatomical joint center: intermalleolar point (n_frames,3)
         omega_F, alpha_F = differentiate_rotation(t, R_F, filt_window, filt_poly) # foot rotations in local foot frame (n_frames,3)
         if COM_F is not None: # compute foot kinematics
             x_com = filt(COM_F, deriv=0) # center of motion position (n_frames,3)
