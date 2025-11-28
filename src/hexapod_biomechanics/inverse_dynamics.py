@@ -73,6 +73,8 @@ class AnkleID:
         M_grf_ajc = M_grf_origin + np.cross(-x_ajc, F_grf) # ground reaction force moment represented at ankle joint center (n_frames,3)
         if COM_F is None: # simple: static with no gravity
             M_ank = -M_grf_ajc
+            M_I_ajc = np.zeros_like(M_ank)
+            M_grav_ajc = np.zeros_like(M_ank)
         else:
             r_com_to_ajc = x_com - x_ajc # moment arm from ankle joint center to foot center of mass (n_frames,3)
             M_grav_ajc = np.cross(r_com_to_ajc, F_grav) # moment due to gravity at ankle joint center (n_frames,3)
@@ -87,11 +89,11 @@ class AnkleID:
         e2 = normalize(filt(e2, deriv=0)) # inversion/eversion axis (n_frames,3)
         e3 = normalize(filt(e3, deriv=0)) # internal/external rotation (n_frames,3)
 
-        M_e1 = np.sum(M_ank * e1, axis=-1)
+        M_e1 = np.sum(M_ank * e1, axis=-1) # (n_frames,)
         M_e2 = np.sum(M_ank * e2, axis=-1)
         M_e3 = np.sum(M_ank * e3, axis=-1)
 
-        F_e1 = np.sum(F_ank * e1, axis=-1)
+        F_e1 = np.sum(F_ank * e1, axis=-1) # (n_frames,)
         F_e2 = np.sum(F_ank * e2, axis=-1)
         F_e3 = np.sum(F_ank * e3, axis=-1)
 
@@ -105,5 +107,9 @@ class AnkleID:
             "F_e2": F_e2,
             "F_e3": F_e3,
             "omega_F": omega_F,
-            "alpha_F": alpha_F
+            "alpha_F": alpha_F,
+            # Eval moment components
+            "M_I": np.sum(M_I_ajc * e1, axis=-1),
+            "M_grf": np.sum(M_grf_ajc * e1, axis=-1),
+            "M_grav": np.sum(M_grav_ajc * e1, axis=-1)
         }

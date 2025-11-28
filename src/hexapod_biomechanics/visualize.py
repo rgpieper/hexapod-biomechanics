@@ -364,6 +364,7 @@ def animate_perturbation(
         kist_origin_base: npt.NDArray,
         side: int,
         markers: npt.NDArray,
+        M_components: Optional[npt.NDArray] = None,
         speed: float = 1.0,
         animation_fps: int = 30,
         filename: Optional[str] = None
@@ -400,6 +401,17 @@ def animate_perturbation(
         ax.set_ylim(np.nanmin(data) - 0.1*rng, np.nanmax(data) + 0.1*rng)
         ax.set_title(title, fontsize=10, loc='left')
         cursors.append(ax.axvline(0, color='k', alpha=0.5, ls=':'))
+
+    line_datas = [alpha, M_e1]
+
+    if M_components is not None:
+        line_datas.extend(M_components)
+        all_data = np.concatenate(line_datas, axis=0)
+        rng = np.nanmax(all_data) - np.nanmax(all_data)
+        ax.set_ylim(np.nanmin(all_data) - 0.1*rng, np.nanmax(all_data) + 0.1*rng)
+        colors = ['c', 'm', 'y']
+        for i, comp in enumerate(M_components):
+            lines.append(ax_mom.plot([], [], c=colors[i], lw=1)[0])
 
     z_max = np.nanmax(markers[:, :, 2]) * 1.2
     z_min = -60
@@ -471,7 +483,7 @@ def animate_perturbation(
             )
         quivers.append(q_rot)
 
-        for l, data in zip(lines, [alpha, M_e1]):
+        for l, data in zip(lines, line_datas):
             l.set_data(t[:frame_i+1], data[:frame_i+1])
 
         return data
