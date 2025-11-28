@@ -377,6 +377,8 @@ def animate_perturbation(
     frame_step = fs_data / fs_animation
     ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
 
+    alpha = np.degrees(alpha)
+
     fig = plt.figure(figsize=(16,9), facecolor='white')
     fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.05, wspace=0.15)
     gs = gridspec.GridSpec(2, 2, width_ratios=[1, 1])
