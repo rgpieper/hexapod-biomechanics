@@ -48,6 +48,7 @@ class HexKistler:
             fz2: npt.NDArray,
             fz3: npt.NDArray,
             fz4: npt.NDArray,
+            stance_thresh: float = 18.0
     ) -> Dict[str, npt.NDArray]:
         """Convert raw forces to ground reaction force parameters, accounting for transformation of the Hexapod.
 
@@ -61,6 +62,7 @@ class HexKistler:
             fz2 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 2 (n_frames,)
             fz3 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 3 (n_frames,)
             fz4 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 4 (n_frames,)
+            stance_thresh (float, optional): Vertical (z) force at which subject is in stance on Hexapod, when COP will be computed. Defaults to 18.0.
 
         Returns:
             Dict[str, npt.NDArray]: Ground reaction force parameters, including:
@@ -105,7 +107,7 @@ class HexKistler:
 
         # compute COP only when force plate is loaded
         Fz_load = Fz_K.copy()
-        Fz_load[np.abs(Fz_load) < 18.0] = np.nan
+        Fz_load[np.abs(Fz_load) < stance_thresh] = np.nan
 
         # compute COP in Kistler frame
         COPx_K = -My_surf / Fz_load
