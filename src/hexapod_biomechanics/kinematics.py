@@ -23,8 +23,10 @@ class AnkleFrame:
             LM_static: npt.NDArray,
             MC_static: npt.NDArray,
             LC_static: npt.NDArray,
-            cluster_S_static: npt.NDArray,
-            cluster_F_static: npt.NDArray
+            CALC_static: npt.NDArray,
+            M1_static: npt.NDArray,
+            M5_static: npt.NDArray,
+            cluster_S_static: npt.NDArray
     ) -> None:
         """Setup the base configuration of the ankle joint coordinate system with a static trial in the neutral position.
 
@@ -34,8 +36,10 @@ class AnkleFrame:
             LM_static (npt.NDArray): Lateral malleolus across a static trial (n_frames, 3)
             MC_static (npt.NDArray): Medial tibial condyle across a static trial (n_frames, 3)
             LC_static (npt.NDArray): Lateral tibial condyle across a static trial (n_frames, 3)
+            CALC_static (npt.NDArray): Calcaneus (heel) across a static trial (n_frames,3)
+            M1_static (npt.NDArray): First metatarsal across a static trial (n_frames,3)
+            M5_static (npt.NDArray): Fifth metatarsal across a static trial (n_frames,3)
             cluster_S_static (npt.NDArray): Shank cluster markers across a static trial (n_frames, n_markers, 3)
-            cluster_F_static (npt.NDArray): Foot cluster markers across a static trial (n_frames, n_markers, 3)
         """
         
         assert side in [-1, 1], f"Invalid side: {side}. Choose '-1' or '1'."
@@ -47,7 +51,7 @@ class AnkleFrame:
         MC_neut = np.nanmean(MC_static, axis=0)
         LC_neut = np.nanmean(LC_static, axis=0)
         self.cluster_S_neut = np.nanmean(cluster_S_static, axis=0) # shape (n_markers, 3)
-        self.cluster_F_neut = np.nanmean(cluster_F_static, axis=0)
+        self.cluster_F_neut = np.nanmean(np.stack([CALC_static, M1_static, M5_static], axis=1), axis=0) # construct cluster from calcaneus and metatarsal markers
 
         IM = (MM_neut + LM_neut) / 2.0 # inter-malleolar point, midway between MM and LM
         IC = (MC_neut + LC_neut) / 2.0 # inter-condylar point, midway between MC and LC
@@ -78,6 +82,11 @@ class AnkleFrame:
         self.T_CG_neut[:3, 2] = z_C_G
         self.T_CG_neut[:3, 3] = o_C_G
 
+        # define foot segment coordinate and associated inertial properties
+        # defined by Dumas et al 2006 (doi:10.1016/j.jbiomech.2006.02.013)
+        o_SCS = o_T_G # origin (anatomical joint center - ankle: intermalleolar point)
+        x_SCS = 0
+
         self.T_TG = np.eye(4)[np.newaxis, ...]
         self.T_CG = np.eye(4)[np.newaxis, ...]
         self.kinematics = {
@@ -94,7 +103,12 @@ class AnkleFrame:
             "o_C": np.empty(0)
         }
 
-    def compute_kinematics(self, cluster_S: npt.NDArray, cluster_F: npt.NDArray) -> Dict[str, npt.NDArray]:
+    def compute_kinematics(self,
+            CALC: npt.NDArray,
+            M1: npt.NDArray,
+            M5: npt.NDArray,
+            cluster_S: npt.NDArray
+    ) -> Dict[str, npt.NDArray]:
         """Compute 6-DOF ankle joint kinematics relative to neutral static configuration.
 
         Args:
@@ -117,7 +131,7 @@ class AnkleFrame:
         """
 
         T_S_move = rigid_transform(self.cluster_S_neut, cluster_S) # shank movement from base to dynamic
-        T_F_move = rigid_transform(self.cluster_F_neut, cluster_F) # foot movement from base to dynamic
+        T_F_move = rigid_transform(self.cluster_F_neut, np.stack([CALC, M1, M5], axis=1)) # foot movement from base to dynamic, constructing foot cluster from calcaneus and metatarsal markers
 
         # move anatomical frames with their rigid segment (F, 4, 4) @ (4, 4) -> (F, 4, 4)
         self.T_TG = T_S_move @ self.T_TG_neut # dynamic tibia/fibula coordinate system in the global frame
