@@ -97,7 +97,7 @@ def axis_difference(target_axis: Tuple[npt.NDArray, npt.NDArray], actual_axis: T
     # (Note the distinction between target and reference axis.)
     # d = norm( (p_a - p_t) x v_t ) / norm(v_t) (norm(v_t) = 1)
     target_to_actual = p_a - p_t # (n_frames,3) or (3,)
-    offset_diff = np.linalg.norm(np.cross(target_to_actual, v_t)) # (n_frames,) or scalar
+    offset_diff = np.linalg.norm(np.cross(target_to_actual, v_t), axis=-1) # (n_frames,) or scalar
 
     return {
         'angle_diff': angle_diff,
