@@ -17,6 +17,7 @@ def animate_ankle_kinematics(
         e3: npt.NDArray,
         T_T: npt.NDArray,
         T_C: npt.NDArray,
+        COM_F: npt.NDArray,
         markers: npt.NDArray,
         side: int,
         speed: float = 1.0,
@@ -35,6 +36,7 @@ def animate_ankle_kinematics(
         e3 (npt.NDArray): Internal/external rotation ankle axis (n_frames,3)
         T_T (npt.NDArray): Tibia/fibula frame representation (n_frames,4,4)
         T_C (npt.NDArray): Calcaneus frame representation (n_frames,4,4)
+        COM_F (npt.NDArray): Foot center of mass (n_frames,3)
         markers (npt.NDArray): Marker trajectories to include in animation (n_frames, n_markers, 3)
         side (int): Ankle side (1: right, -1: left)
         speed (float, optional): Playback speed scale. Defaults to 1.0.
@@ -119,6 +121,8 @@ def animate_ankle_kinematics(
         scatters.clear()
         s = ax3d.scatter(markers[frame_i, :, 0], markers[frame_i, :, 1], markers[frame_i, :, 2], c='k', s=15, alpha=0.6)
         scatters.append(s)
+        s_com = ax3d.scatter(COM_F[frame_i, 0], COM_F[frame_i, 1], COM_F[frame_i, 2], c='purple', s=25, alpha=0.5)
+        scatters.append(s_com)
 
         def add_vec(o: npt.NDArray, v: npt.NDArray, color: str, lw: float = 2, length: float = 40) -> None:
             """Helper for drawing 3D vectors.
