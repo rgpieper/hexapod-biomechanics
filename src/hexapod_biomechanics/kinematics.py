@@ -26,7 +26,8 @@ class AnkleFrame:
             CALC_static: npt.NDArray,
             M1_static: npt.NDArray,
             M5_static: npt.NDArray,
-            cluster_S_static: npt.NDArray
+            cluster_S_static: npt.NDArray,
+            sex: str = "m"
     ) -> None:
         """Setup the base configuration of the ankle joint coordinate system with a static trial in the neutral position.
 
@@ -40,6 +41,7 @@ class AnkleFrame:
             M1_static (npt.NDArray): First metatarsal across a static trial (n_frames,3)
             M5_static (npt.NDArray): Fifth metatarsal across a static trial (n_frames,3)
             cluster_S_static (npt.NDArray): Shank cluster markers across a static trial (n_frames, n_markers, 3)
+            sex (npt.NDArray): Sex of subject ("m": male or "f": female) for applying anthropometric data. Defaults to "m".
         """
         
         assert side in [-1, 1], f"Invalid side: {side}. Choose '-1' or '1'."
@@ -50,6 +52,9 @@ class AnkleFrame:
         LM_neut = np.nanmean(LM_static, axis=0)
         MC_neut = np.nanmean(MC_static, axis=0)
         LC_neut = np.nanmean(LC_static, axis=0)
+        CALC_neut = np.nanmean(CALC_static, axis=0)
+        M1_neut = np.nanmean(M1_static, axis=0)
+        M5_neut = np.nanmean(M5_static, axis=0)
         self.cluster_S_neut = np.nanmean(cluster_S_static, axis=0) # shape (n_markers, 3)
         self.cluster_F_neut = np.nanmean(np.stack([CALC_static, M1_static, M5_static], axis=1), axis=0) # construct cluster from calcaneus and metatarsal markers
 
@@ -82,10 +87,25 @@ class AnkleFrame:
         self.T_CG_neut[:3, 2] = z_C_G
         self.T_CG_neut[:3, 3] = o_C_G
 
-        # define foot segment coordinate and associated inertial properties
+        # define foot segment legnth, segment coordinate system and center of mass
         # defined by Dumas et al 2006 (doi:10.1016/j.jbiomech.2006.02.013)
         o_SCS = o_T_G # origin (anatomical joint center - ankle: intermalleolar point)
-        x_SCS = 0
+        mid_met = (M1_neut + M5_neut) / 2.0 # midpoint between first and fifth metatarsals
+        x_SCS = normalize(mid_met - CALC_neut) # x-axis: from calcaneus to midpoint between metatarsals
+        y_SCS = normalize(self.side*np.cross(M5_neut - CALC_neut, M1_neut - CALC_neut)) # y-axis: normal to plane including calcaneus and metatarsals, pointing cranially
+        z_SCS = normalize(np.cross(x_SCS, y_SCS))
+        T_SCS = np.eye(4) # transformation from foot segment coordinate system to the global frame
+        T_SCS[:3, 0] = x_SCS
+        T_SCS[:3, 1] = y_SCS
+        T_SCS[:3, 2] = z_SCS
+        T_SCS[:3, 3] = o_SCS
+        L_seg = np.linalg.norm(mid_met - o_SCS) # foot segment length (scalar): anatomical joint center to midpoint of metatarsals
+        assert sex in ["m", "f"], f"Invalid sex: {sex}. Choose \"m\" or \"f\"."
+        if sex == "m":
+            COM_SCS = np.array([0.382, -0.151, 0.026])*L_seg
+        elif sex == "f":
+            COM_SCS = np.array([0.270, -0.218, 0.039])*L_seg
+        self.COM_C = (np.linalg.inv(self.T_CG_neut) @ T_SCS @ np.append(COM_SCS, 1))[:3] # foot COM represented in calcaneus frame
 
         self.T_TG = np.eye(4)[np.newaxis, ...]
         self.T_CG = np.eye(4)[np.newaxis, ...]
@@ -112,8 +132,10 @@ class AnkleFrame:
         """Compute 6-DOF ankle joint kinematics relative to neutral static configuration.
 
         Args:
-            cluster_S (npt.NDArray): Shank cluster trajectory (n_frames, n_markers, 3)
-            cluster_F (npt.NDArray): Foot cluster trajectory (n_frames, n_markers, 3)
+            CALC (npt.NDArray): Calcaneus trajectory (n_frames,3)
+            M1 (npt.NDArray): First metatarsal trajectory (n_frames,3)
+            M5 (npt.NDArray): Fifth metatarsal trajectory (n_frames,3)
+            cluster_S (npt.NDArray): Shank cluster trajectory (n_frames,n_markers,3)
 
         Returns:
             Dict[str, npt.NDArray]: Kinematics including:
@@ -128,6 +150,7 @@ class AnkleFrame:
                 'e3' (npt.NDArray): Internal/external rotation axis (n_frames,3)
                 'o_ajc' (npt.NDArray): Ankle joint center: intermalleolar point (tibia/fibula frame origin) (n_frames,3)
                 'R_F' (npt.NDArray): Foot orientation (rotation matrix tracking calcaneus frame) (n_frames,3,3)
+                'COM_F (npt.NDArray): Foot center of mass in the global frame (n_frames,3)
         """
 
         T_S_move = rigid_transform(self.cluster_S_neut, cluster_S) # shank movement from base to dynamic
@@ -136,6 +159,8 @@ class AnkleFrame:
         # move anatomical frames with their rigid segment (F, 4, 4) @ (4, 4) -> (F, 4, 4)
         self.T_TG = T_S_move @ self.T_TG_neut # dynamic tibia/fibula coordinate system in the global frame
         self.T_CG = T_F_move @ self.T_CG_neut # dynamic calcaneus coordinate system in the global frame
+
+        COM_G = (self.T_CG @ np.append(self.COM_C, 1))[:, :3] # track foot COM in global frame with calcaneus frame
 
         x_T_G = self.T_TG[:, :3, 0] # tibia/fibula x-axis (F, 3)
         o_T_G = self.T_TG[:, :3, 3] # tibia/fibula origin (F, 3)
@@ -182,7 +207,8 @@ class AnkleFrame:
             "e2": e2,
             "e3": e3,
             "o_ajc": o_T_G,
-            "R_F": self.T_CG[:, :3, :3]
+            "R_F": self.T_CG[:, :3, :3],
+            "COM_F": COM_G
         }
 
         return self.kinematics
