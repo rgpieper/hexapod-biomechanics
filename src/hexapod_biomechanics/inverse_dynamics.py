@@ -15,7 +15,7 @@ class AnkleID:
 
         Args:
             body_mass (float, optional): Subject body mass [kg]. Defaults to 0.0 for dynamics with no inertial components.
-            Inorm (npt.NDArray, optional): Segment-mass-normalized foot inertia matrix at the foot center of mass, represented in the calcaneus coordinate frame [mm^2]. Defaults to np.eye(3).
+            Inorm (npt.NDArray, optional): Segment-mass-normalized foot inertia matrix at the foot center of mass, represented in the calcaneus coordinate frame [mm^2] (3,3). Defaults to np.eye(3).
             sex (str, optional): Sex of subject ("m": male or "f": female) for applying anthropometric data. Defaults to "m".
         """
 
