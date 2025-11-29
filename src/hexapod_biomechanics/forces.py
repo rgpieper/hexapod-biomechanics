@@ -4,6 +4,7 @@ from itertools import combinations
 import numpy as np
 import numpy.typing as npt
 from scipy.spatial.distance import pdist
+from scipy.spatial.transform import Rotation
 from hexapod_biomechanics.utils import rigid_transform, clamp, normalize, inv_rodrigues
 
 class HexKistler:
@@ -171,6 +172,7 @@ class HexKistler:
                 'origin' (npt.NDArray): Axis reference point nearest to base/neutral Kistler origin [mm] (3,)
                 'direction' (npt.NDArray): Unit vector axis of rotation (3,)
                 'angle' (float): Rotation magnitude [radians]
+                'angle_tjct' (npt.NDArray): Angular position trajectory of Hexapod/Kistler [radians] (n_frames,)
         """
 
         if len(cluster_hex_pert.shape) == 3: # frame dimension included (n_frames,n_markers,3)
@@ -183,11 +185,16 @@ class HexKistler:
         x = T[:3, 3] # translation (3,)
 
         theta, n = inv_rodrigues(R, tol=1e-3)
+
+        rot = Rotation.from_matrix(self.T_KG[:, :3, :3]) # rotation trajectory of Kistler
+        rot_vec = rot.as_rotvec() # (n_frames,3)
+
         if n is None:
             return {
                 "origin": None,
                 "direction": n,
-                "angle": theta
+                "max_angle": theta,
+                "angle_tjct": np.linalg.norm(rot_vec, axis=1) # if no axis found, report norm of rotation vector [rad] (n_frames,)
             }
 
         # tranfromation: p_end = T*p_start_hom = R*p_start + x
@@ -203,8 +210,11 @@ class HexKistler:
         slide = np.dot(p_to_K, n) # project vector onto rotational axis
         p_near_K = p_near_orig + (slide * n) # slide reference point along rotation axis to near neutral Kistler origin
 
+        theta_tjct = np.sum(rot_vec * n, axis=1) # rotation about the principle Kistler rotation axis [rad] (n_frames,)
+
         return {
             "origin": p_near_K,
             "direction": n,
-            "angle": theta
+            "max_angle": theta,
+            "angle_tjct": theta_tjct
         }
