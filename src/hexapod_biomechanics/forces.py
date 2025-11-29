@@ -182,7 +182,7 @@ class HexKistler:
         R = T[:3, :3] # rotation matrix (3,3)
         x = T[:3, 3] # translation (3,)
 
-        theta, n = inv_rodrigues(R, tol=1e-4)
+        theta, n = inv_rodrigues(R, tol=1e-3)
         if n is None:
             return {
                 "origin": None,

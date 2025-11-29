@@ -504,14 +504,15 @@ def animate_perturbation(
             )
         quivers.append(q_ank)
 
-        q_rot = ax3d.quiver(
-                o_rot[0], o_rot[1], o_rot[2],
-                v_rot[0], v_rot[1], v_rot[2],
-                color='r', lw=3,
-                length=200,
-                arrow_length_ratio=0.2
-            )
-        quivers.append(q_rot)
+        if o_rot is not None:
+            q_rot = ax3d.quiver(
+                    o_rot[0], o_rot[1], o_rot[2],
+                    v_rot[0], v_rot[1], v_rot[2],
+                    color='r', lw=3,
+                    length=200,
+                    arrow_length_ratio=0.2
+                )
+            quivers.append(q_rot)
 
         for l, data in zip(lines, line_datas):
             l.set_data(t[:frame_i+1], data[:frame_i+1])
