@@ -14,7 +14,7 @@ class HexKistler:
         """Setup transformation from Kistler frame to global frame with Hexapod in the base/home configuration (static trial).
 
         Args:
-            cluster_hex_static (npt.NDArray): Hexapod markers across a static trial (n_frames,n_markers,3)
+            cluster_hex_static (npt.NDArray): Hexapod markers across a static trial [mm] (n_frames,n_markers,3)
         """
 
         self.cluster_hex_base = np.nanmean(cluster_hex_static, axis=0) # (n_markers, 3)

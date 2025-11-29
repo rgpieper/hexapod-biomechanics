@@ -7,8 +7,17 @@ from scipy.signal import savgol_filter
 from scipy.constants import g
 
 class AnkleID:
+    """Ankle inverse dynamics solver.
+    """
 
     def __init__(self, body_mass: float = 0.0, Inorm: npt.NDArray = np.eye(3), sex: str = "m"):
+        """Estimate foot segment mass and un-normalized foot inertia matrix according to body mass.
+
+        Args:
+            body_mass (float, optional): Subject body mass [kg]. Defaults to 0.0 for dynamics with no inertial components.
+            Inorm (npt.NDArray, optional): Segment-mass-normalized foot inertia matrix at the foot center of mass, represented in the calcaneus coordinate frame [mm^2]. Defaults to np.eye(3).
+            sex (str, optional): Sex of subject ("m": male or "f": female) for applying anthropometric data. Defaults to "m".
+        """
 
         # inertial properties estimated according to Dumas et al 2006 (doi:10.1016/j.jbiomech.2006.02.013)
         assert sex in ["m", "f"], f"Invalid sex: {sex}. Choose \"m\" or \"f\"."
@@ -33,6 +42,37 @@ class AnkleID:
             filt_window_duration: float = 0.05, # seconds, ~20-30Hz cutoff,
             filt_poly: int = 4
     ) -> Dict[str, npt.ArrayLike]:
+        """Compute inverse dynamics of the foot to determine ankle forces and moments.
+
+        Args:
+            t (npt.NDArray): Time vector [sec] (n_frames,)
+            grf_force (npt.NDArray): Ground reaction force trajectory in the global frame [N] (n_frames,3)
+            grf_moment_origin (npt.NDArray): Ground reaction moments in the global frame, represented at the global origin [N*mm] (n_frames,3)
+            e1 (npt.NDArray): Dorsiflexion/plantarflexion axis (n_frames,3)
+            e2 (npt.NDArray): Inversion/eversion axis (n_frames,3)
+            e3 (npt.NDArray): Internal/external rotation axis (n_frames,3)
+            o_ajc (npt.NDArray): Ankle anatomical joint center: intermalleolar point (tibia/fibula frame origin) in the global frame [mm] (n_frames,3)
+            R_F (npt.NDArray): Foot orientation (rotation matrix tracking calcaneus frame) (n_frames,3,3)
+            COM_F (Optional[npt.NDArray], optional): Foot center of mass in the global frame [mm] (n_frames,3). Defaults to None.
+            filt_window_duration (float, optional): Duration of filter window [sec], dictating lowpass cutoff frequency. Defaults to 0.05, corresponding to ~20-30Hz cutoff.
+            filt_poly (int, optional): Filter polynomial order. Defaults to 4.
+
+        Returns:
+            Dict[str, npt.ArrayLike]:
+                M_ank (npt.NDArray): Ankle moment in the global frame [N*mm] (n_frames,3)
+                F_ank (npt.NDArray): Ankle-shank interface force in the global frame [N] (n_frames,3)
+                M_e1 (npt.NDArray): Moment about dorsiflexion axis [N*mm] (n_frames,)
+                M_e2 (npt.NDArray): Moment about inversion axis [N*mm] (n_frames,)
+                M_e3 (npt.NDArray): Moment about internal rotation axis [N*mm] (n_frames,)
+                F_e1 (npt.NDArray): Force along dorsiflexion axis [N] (n_frames,)
+                F_e2 (npt.NDArray): Force along inversion axis [N] (n_frames,)
+                F_e3 (npt.NDArray): Force along internal rotation axis [N] (n_frames,)
+                omega_F (npt.NDArray): Foot angular velocity in the body (calcaneus) frame [rad/s] (n_frames,3)
+                alpha_F (npt.NDArray): Foot angular acceleration in the body (calcaneus) frame [rad/s/s] (n_frames,3)
+                M_I (npt.NDArray): Moment at the AJC due to foot inertia [N*mm] (n_frames,)
+                M_grf (npt.NDArray): Moment at the AJC due to the ground reaction forces/moments [N*mm] (n_frames,)
+                M_grav (npt.NDArray): Moment at the AJC due to gravity [N*mm] (n_frames,)
+        """
         
         dt = np.mean(np.diff(t)) # sample period [sec]
         fs = 1 / dt # sample frequency [Hz]

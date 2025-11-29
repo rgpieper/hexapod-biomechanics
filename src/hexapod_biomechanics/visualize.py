@@ -1,5 +1,5 @@
 
-from typing import Optional
+from typing import Optional, List
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import matplotlib.gridspec as gridspec
@@ -368,11 +368,34 @@ def animate_perturbation(
         kist_origin_base: npt.NDArray,
         side: int,
         markers: npt.NDArray,
-        M_components: Optional[npt.NDArray] = None,
+        M_components: Optional[List[npt.NDArray]] = None,
         speed: float = 1.0,
         animation_fps: int = 30,
         filename: Optional[str] = None
 ) -> animation.FuncAnimation:
+    """Creates animation tracking ankle dorsiflexion angle and torque during perturbations with tracking of dorsiflexion axis and perturbation axis for comparison.
+
+    Args:
+        t (npt.NDArray): Time vector [sec] (n_frames,)
+        alpha (npt.NDArray): Dorsiflexion/plantarflexion angle trajectory [rad] (n_frames,)
+        M_e1 (npt.NDArray): Ankle moment about ankle joint coordinate system axis e1 (dorsiflexion) [N*mm] (n_frames,3)
+        o_ajc (npt.NDArray): Ankle anatomical joint center trajectory in the global frame [mm] (n_frames,3)
+        e1 (npt.NDArray): Ankle joint coordinate system axis e1 (dorsiflexion) (n_frames,3)
+        o_rot (npt.NDArray): Origin/reference point of perturbation axis of rotation in the global frame [mm] (n_frames,3)
+        v_rot (npt.NDArray): Vector describing perturbation axis of rotation (n_frames,3)
+        corners (npt.NDArray): Trajectory locations of Kistler corners in the global frame [mm] (n_frames,n_corners,3)
+        sensors (npt.NDArray): Trajectory locations of Kistler sensors in the global frame [mm] (n_frames,n_sensors,3)
+        kist_origin_base (npt.NDArray): Origin of the Kistler frame in the base configuration, represented in the global frame [mm] (3,)
+        side (int): Ankle side (1: right, -1: left)
+        markers (npt.NDArray): Marker trajectories to include in animation [mm] (n_frames,n_markers,3)
+        M_components (Optional[List[npt.NDArray]], optional): Component moments contributing to total dorsiflexion ankle moment to be plotted [N*mm]. Defaults to None.
+        speed (float, optional): Playback speed scale. Defaults to 1.0.
+        animation_fps (int, optional): Animation frames per second. Defaults to 30.
+        filename (Optional[str], optional): Filename/path to save animation. Defaults to None.
+
+    Returns:
+        animation.FuncAnimation: Perturbation animation object for viewing.
+    """
     
     fs_data = 1 / np.mean(np.diff(t))
     fs_animation = animation_fps / speed
@@ -400,7 +423,6 @@ def animate_perturbation(
         [alpha, M_e1],
         ['Ankle Angle', 'Ankle Moment']
     ):
-        
         lines.append(ax.plot([], [], c='b', lw=1.5)[0])
         ax.set_xlim(t[0], t[-1])
         rng = np.nanmax(data) - np.nanmin(data)

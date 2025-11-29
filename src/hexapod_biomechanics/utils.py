@@ -68,18 +68,20 @@ def clamp(val: npt.ArrayLike) -> npt.ArrayLike:
 
     return np.clip(val, -1.0, 1.0)
 
-def axis_difference(target_axis: Tuple[npt.NDArray, npt.NDArray], actual_axis: Tuple[npt.NDArray, npt.NDArray]) -> Dict[str, npt.ArrayLike]:
+def axis_difference(target_axis: Tuple[npt.ArrayLike, npt.ArrayLike], actual_axis: Tuple[npt.ArrayLike, npt.ArrayLike]) -> Dict[str, npt.ArrayLike]:
     """Compute orientation and offset difference between two axes.
 
     Individual axis parameters (shape (3,)) can be passed to return single (scalar) differences.
     Frame-wise axis parameters (shape (n_frames,3)) will return frame-wise differences (shape (n_frames,)).
 
     Args:
-        target_axis (Tuple[npt.NDArray, npt.NDArray]): Target axis parameters: (origin, direction).
-        actual_axis (Tuple[npt.NDArray, npt.NDArray]): Actual axis parameters: (origin, direction). Offset will be computed between actual origin and target axis.
+        target_axis (Tuple[npt.ArrayLike, npt.ArrayLike]): Target axis parameters: (origin, direction).
+        actual_axis (Tuple[npt.ArrayLike, npt.ArrayLike]): Actual axis parameters: (origin, direction). Offset will be computed between actual origin and target axis.
 
     Returns:
-        Dict[str, npt.ArrayLike]: _description_
+        Dict[str, npt.ArrayLike]:
+            angle_diff (npt.ArrayLike): Angular deviation between target and actual axis [rad] (n_frames,) or scalar
+            offset_diff (npt.ArrayLike): Distance between actual reference point/origin and closest point on target axis [mm] (n_frames,) or scalar
     """
 
     p_t = target_axis[0] # (n_frames, 3) or (3,)
@@ -101,7 +103,7 @@ def axis_difference(target_axis: Tuple[npt.NDArray, npt.NDArray], actual_axis: T
 
     return {
         'angle_diff': angle_diff,
-        'offset_diff': offset_diff # difference between actual reference point/origin and target axis
+        'offset_diff': offset_diff
     }
 
 def inv_rodrigues(R: npt.NDArray, tol: float = 1e-6) -> Tuple[float, Optional[npt.NDArray]]:
@@ -109,11 +111,11 @@ def inv_rodrigues(R: npt.NDArray, tol: float = 1e-6) -> Tuple[float, Optional[np
 
     Args:
         R (npt.NDArray): Rotation matrix (3,3)
-        tol (float, optional): Minimum theta for which axis will be computed. Defaults to 1e-6.
+        tol (float, optional): Minimum theta for which axis will be computed [radians]. Defaults to 1e-6.
 
     Returns:
         Tuple[npt.ArrayLike, Optional[npt.NDArray]]:
-            theta (float): Magnitude of rotation about axis (radians)
+            theta (float): Magnitude of rotation about axis [radians]
             n (Optional[npt.NDArray]): Axis of rotation (3,)
     """
 
@@ -147,15 +149,15 @@ def differentiate_rotation(
     """Compute 3D angular velocity and acceleration from rotation matrix timeseries.
 
     Args:
-        time (npt.NDArray): Time vector (n_frames,)
+        time (npt.NDArray): Time vector [sec] (n_frames,)
         R (npt.NDArray): Series of rotation matrices describing body orientation in global frame (n_frames,3,3)
-        window_duration (float, optional): Time length of filter, dictating cutoff frequency (seconds). Defaults to 0.05.
+        filt_window (int, optional): Sample length of filter. Defaults to 11.
         filt_poly (int, optional): Filter polynomial order. Defaults to 4.
 
     Returns:
         Tuple[npt.NDArray, npt.NDArray]:
-            omega (npt.NDArray): 3D angular velocity represented in body frame (n_frames,3)
-            alpha (npt.NDArray): 3D angular acceleration represented in body frame (n_frames,3)
+            omega (npt.NDArray): 3D angular velocity represented in body frame [rad/s] (n_frames,3)
+            alpha (npt.NDArray): 3D angular acceleration represented in body frame [rad/s/s] (n_frames,3)
     """
     
     rot = Rotation.from_matrix(R)

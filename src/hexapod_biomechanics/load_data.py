@@ -66,7 +66,7 @@ class C3DMan:
         Returns:
             Tuple[npt.NDArray, npt.NDArray]:
                 points (npt.NDArray): Point coordinate trajectories with shape (n_timepoints, n_points, 3).
-                t (npt.NDArray): Time vector corresponding to point coordinates.
+                t (npt.NDArray): Time vector corresponding to point coordinates [sec].
         """
 
         self.point_map.sort_index(inplace=True)
@@ -118,7 +118,7 @@ class C3DMan:
         Returns:
             Tuple[npt.NDArray, npt.NDArray]:
                 sel_analogs (npt.NDArray): Analog signals with shape (n_timepoints, n_analog_channels).
-                t_analogs (npt.NDArray): Time vector corresponding to analog signals.
+                t_analogs (npt.NDArray): Time vector corresponding to analog signals [sec].
         """
 
         self.analog_map.sort_index(inplace=True)
