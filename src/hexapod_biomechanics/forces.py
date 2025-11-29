@@ -19,11 +19,11 @@ class HexKistler:
 
         self.cluster_hex_base = np.nanmean(cluster_hex_static, axis=0) # (n_markers, 3)
 
-        self.a_z0 = -41 # mm, distance from force plate surface to sensor plane / Kistler origin
-        self.a = 210 # mm, distance from sensor axis to kistler y-axis
-        self.b = 260 # mm, distance from sensor axis to Kistler x-axis
+        self.a_z0 = -41 # [mm], distance from force plate surface to sensor plane / Kistler origin
+        self.a = 210 # [mm], distance from sensor axis to kistler y-axis
+        self.b = 260 # [mm], distance from sensor axis to Kistler x-axis
 
-        h_marker = 12 # mm, marker height (distance from marker to force plate surface)
+        h_marker = 12 # [mm], marker height (distance from marker to force plate surface)
 
         distances = pdist(self.cluster_hex_base)
         pairs = list(combinations(range(self.cluster_hex_base.shape[0]), 2))
@@ -53,24 +53,24 @@ class HexKistler:
         """Convert raw forces to ground reaction force parameters, accounting for transformation of the Hexapod.
 
         Args:
-            cluster_hex (npt.NDArray): Hexapod marker trajectories (n_frames,n_markers,3)
-            fx12 (npt.NDArray): Raw x-direction force acting on Kistler between sensors 1 and 2 (n_frames,)
-            fx34 (npt.NDArray): Raw x-direction force acting on Kistler between sensros 3 and 4 (n_frames,)
-            fy14 (npt.NDArray): Raw y-direction force acting on Kistler between sensors 1 and 4 (n_frames,)
-            fy23 (npt.NDArray): Raw y-direction force acting on Kistler between sensors 2 and 3 (n_frames,)
-            fz1 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 1 (n_frames,)
-            fz2 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 2 (n_frames,)
-            fz3 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 3 (n_frames,)
-            fz4 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 4 (n_frames,)
-            stance_thresh (float, optional): Vertical (z) force at which subject is in stance on Hexapod, when COP will be computed. Defaults to 18.0.
+            cluster_hex (npt.NDArray): Hexapod marker trajectories [mm] (n_frames,n_markers,3)
+            fx12 (npt.NDArray): Raw x-direction force acting on Kistler between sensors 1 and 2 [N] (n_frames,)
+            fx34 (npt.NDArray): Raw x-direction force acting on Kistler between sensros 3 and 4 [N] (n_frames,)
+            fy14 (npt.NDArray): Raw y-direction force acting on Kistler between sensors 1 and 4 [N] (n_frames,)
+            fy23 (npt.NDArray): Raw y-direction force acting on Kistler between sensors 2 and 3 [N] (n_frames,)
+            fz1 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 1 [N] (n_frames,)
+            fz2 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 2 [N] (n_frames,)
+            fz3 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 3 [N] (n_frames,)
+            fz4 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 4 [N] (n_frames,)
+            stance_thresh (float, optional): Vertical (z) force at which subject is in stance on Hexapod, when COP will be computed [N]. Defaults to 18.0.
 
         Returns:
             Dict[str, npt.NDArray]: Ground reaction force parameters, including:
-                'force' (npt.NDArray): Force components in global frame (n_frames,3)
-                'moment_origin' (npt.NDArray): Moment components in global frame represented at global origin (n_frames,3)
-                'COP' (npt.NDArray): Center of pressure coordinates in global frame (n_frames,3)
-                'moment_free' (npt.NDArray): Free moment (friction) components at COP in global frame (n_frames,3)
-                'moment_free_scalar' (float): Magnitude of free moment.
+                'force' (npt.NDArray): Force components in global frame [N] (n_frames,3)
+                'moment_origin' (npt.NDArray): Moment components in global frame represented at global origin [N*mm] (n_frames,3)
+                'COP' (npt.NDArray): Center of pressure coordinates in global frame [mm] (n_frames,3)
+                'moment_free' (npt.NDArray): Free moment (friction) components at COP in global frame [N*mm] (n_frames,3)
+                'moment_free_scalar' (float): Magnitude of free moment [N*mm].
         """
         
         assert cluster_hex.shape[0] == fz1.shape[0], f"Force data length ({fz1.shape[0]}) does not match marker data length ({cluster_hex.shape[0]})."
@@ -138,8 +138,8 @@ class HexKistler:
 
         Returns:
             Tuple[npt.NDArray, npt.NDArray]:
-                corners (npt.NDArray): Kistler corner trajectories (n_frames,4 corners,3)
-                sensors (npt.NDArray): Kistler sensor trajectories (n_frames,4 sensors,3)
+                corners (npt.NDArray): Kistler corner trajectories [mm] (n_frames,4 corners,3)
+                sensors (npt.NDArray): Kistler sensor trajectories [mm] (n_frames,4 sensors,3)
         """
 
         corners_K = np.array([ # surface corner locations (homogeneous) in Kistler's frame
@@ -168,9 +168,9 @@ class HexKistler:
 
         Returns:
             Optional[Dict[str, npt.NDArray]]: Rotational axis parameters, including:
-                'origin' (npt.NDArray): Axis reference point nearest to base/neutral Kistler origin (3,)
+                'origin' (npt.NDArray): Axis reference point nearest to base/neutral Kistler origin [mm] (3,)
                 'direction' (npt.NDArray): Unit vector axis of rotation (3,)
-                'angle' (float): Rotation magnitude (radians)
+                'angle' (float): Rotation magnitude [radians]
         """
 
         if len(cluster_hex_pert.shape) == 3: # frame dimension included (n_frames,n_markers,3)

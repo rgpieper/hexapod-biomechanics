@@ -27,17 +27,17 @@ def animate_ankle_kinematics(
     """Creates animation of the ankle joint coordinate system with corresponding kinematics.
 
     Args:
-        t (npt.NDArray): Time vector (n_frames,)
-        alpha (npt.NDArray): Dorsiflexion/plantarflexion angle trajectory (n_frames,)
-        beta (npt.NDArray): Inversion/eversion angle trajectory (n_frames,)
-        gamma (npt.NDArray): Internal/external rotation angle trajectory (n_frames,)
+        t (npt.NDArray): Time vector [sec] (n_frames,)
+        alpha (npt.NDArray): Dorsiflexion/plantarflexion angle trajectory [rad] (n_frames,)
+        beta (npt.NDArray): Inversion/eversion angle trajectory [rad] (n_frames,)
+        gamma (npt.NDArray): Internal/external rotation angle trajectory [rad] (n_frames,)
         e1 (npt.NDArray): Dorsiflexion/plantarflexion ankle axis (n_frames,3)
         e2 (npt.NDArray): Inversion/eversion ankle axis (n_frames,3)
         e3 (npt.NDArray): Internal/external rotation ankle axis (n_frames,3)
-        T_T (npt.NDArray): Tibia/fibula frame representation (n_frames,4,4)
-        T_C (npt.NDArray): Calcaneus frame representation (n_frames,4,4)
-        COM_F (npt.NDArray): Foot center of mass (n_frames,3)
-        markers (npt.NDArray): Marker trajectories to include in animation (n_frames, n_markers, 3)
+        T_T (npt.NDArray): Tibia/fibula frame representation [mm] (n_frames,4,4)
+        T_C (npt.NDArray): Calcaneus frame representation [mm] (n_frames,4,4)
+        COM_F (npt.NDArray): Foot center of mass [mm] (n_frames,3)
+        markers (npt.NDArray): Marker trajectories to include in animation [mm] (n_frames, n_markers, 3)
         side (int): Ankle side (1: right, -1: left)
         speed (float, optional): Playback speed scale. Defaults to 1.0.
         animation_fps (int, optional): Animation frames per second. Defaults to 30.
@@ -54,7 +54,7 @@ def animate_ankle_kinematics(
     frame_step = fs_data / fs_animation
     ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
 
-    alpha = np.degrees(alpha)
+    alpha = np.degrees(alpha) # [deg]
     beta = np.degrees(beta)
     gamma = np.degrees(gamma)
 
@@ -128,11 +128,11 @@ def animate_ankle_kinematics(
             """Helper for drawing 3D vectors.
 
             Args:
-                o (npt.NDArray): Vector origin (3,)
+                o (npt.NDArray): Vector origin [mm] (3,)
                 v (npt.NDArray): Vector (3,)
                 color (str): Plotting color.
                 lw (float, optional): Vector linewidth. Defaults to 2.
-                length (float, optional): Vector length. Defaults to 40.
+                length (float, optional): Vector length [mm]. Defaults to 40.
             """
 
             q = ax3d.quiver(
@@ -201,20 +201,20 @@ def animate_grf(
     """Creates animation of the ground reaction force in context with body and hexapod position.
 
     Args:
-        t (npt.NDArray): Time vector (n_frames,)
-        forces (npt.NDArray): Component forces acting on the subject in global frame (n_frames,3)
-        COP (npt.NDArray): Center of pressure coordinates in global frame (n_frames,3)
-        moment_free (npt.NDArray): Free moment (twist, frictional) at COP in global frame (n_frames,3)
-        corners (npt.NDArray): Coordinate trajectories of the Kistler corners (n_frames,n_corners,3)
-        sensors (npt.NDArray): Coordinate trajectories of the Kistler sensors (n_frames,n_sensors,3)
-        kist_origin_base (npt.NDArray): Origin of the Kistler coordinate system in the base/static configuration (3,)
+        t (npt.NDArray): Time vector [sec] (n_frames,)
+        forces (npt.NDArray): Component forces acting on the subject in global frame [N] (n_frames,3)
+        COP (npt.NDArray): Center of pressure coordinates in global frame [mm] (n_frames,3)
+        moment_free (npt.NDArray): Free moment (twist, frictional) at COP in global frame [N*mm] (n_frames,3)
+        corners (npt.NDArray): Coordinate trajectories of the Kistler corners [mm] (n_frames,n_corners,3)
+        sensors (npt.NDArray): Coordinate trajectories of the Kistler sensors [mm] (n_frames,n_sensors,3)
+        kist_origin_base (npt.NDArray): Origin of the Kistler coordinate system in the base/static configuration [mm] (3,)
         side (int): Ankle side (1: right, -1: left)
-        markers (npt.NDArray): Marker trajectories to incude in animation (n_frames,n_markers,3)
+        markers (npt.NDArray): Marker trajectories to incude in animation [mm] (n_frames,n_markers,3)
         speed (float, optional): Playback speed scale. Defaults to 1.0.
         animation_fps (int, optional): Animation frames per second. Defaults to 30.
-        stance_thresh (float, optional): Vertical (z) force at which subject is in stance on Hexapod, when COP/GRF will be plotted. Defaults to 18.0.
-        force_scale (float, optional): Length of force vector relative to magnitude, in mm/N. Defaults to 0.5.
-        moment_scale (float, optional): Length of free moment vector relative to magnitude, in mm/N. Defaults to 0.05.
+        stance_thresh (float, optional): Vertical (z) force at which subject is in stance on Hexapod, when COP/GRF will be plotted [N]. Defaults to 18.0.
+        force_scale (float, optional): Length of force vector relative to magnitude [mm/N]. Defaults to 0.5.
+        moment_scale (float, optional): Length of free moment vector relative to magnitude [mm/N]. Defaults to 0.05.
         filename (Optional[str], optional): Filename/path to save animation. Defaults to None.
 
     Returns:
@@ -415,9 +415,11 @@ def animate_perturbation(
         all_data = np.concatenate(line_datas, axis=0)
         rng = np.nanmax(all_data) - np.nanmax(all_data)
         ax.set_ylim(np.nanmin(all_data) - 0.1*rng, np.nanmax(all_data) + 0.1*rng)
+        labels = ['GRF', 'grav', 'inertia']
         colors = ['c', 'm', 'y']
         for i, comp in enumerate(M_components):
-            lines.append(ax_mom.plot([], [], c=colors[i], lw=1)[0])
+            lines.append(ax_mom.plot([], [], c=colors[i], lw=1, label=labels[i])[0])
+        ax_mom.legend(loc='upper right', fontsize='small')
 
     z_max = np.nanmax(markers[:, :, 2]) * 1.2
     z_min = -60
