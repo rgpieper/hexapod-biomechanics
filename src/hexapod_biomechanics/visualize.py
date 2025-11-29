@@ -336,6 +336,9 @@ def animate_grf(
         for l, f_dim in zip(lines, [forces[:, 0], forces[:, 1], forces[:, 2]]):
             l.set_data(t[:frame_i+1], f_dim[:frame_i+1])
 
+        for c in cursors:
+            c.set_xdata([t[frame_i]])
+
         return lines
     
     anim = animation.FuncAnimation(
@@ -363,6 +366,7 @@ def animate_perturbation(
         e1: npt.NDArray,
         o_rot: npt.NDArray,
         v_rot: npt.NDArray,
+        pert_tjct: npt.NDArray,
         corners: npt.NDArray,
         sensors: npt.NDArray,
         kist_origin_base: npt.NDArray,
@@ -383,6 +387,7 @@ def animate_perturbation(
         e1 (npt.NDArray): Ankle joint coordinate system axis e1 (dorsiflexion) (n_frames,3)
         o_rot (npt.NDArray): Origin/reference point of perturbation axis of rotation in the global frame [mm] (n_frames,3)
         v_rot (npt.NDArray): Vector describing perturbation axis of rotation (n_frames,3)
+        pert_tjct (npt.NDArray): Angular position trajectory of Kistler/Hexapod [radians] (n_frames,)
         corners (npt.NDArray): Trajectory locations of Kistler corners in the global frame [mm] (n_frames,n_corners,3)
         sensors (npt.NDArray): Trajectory locations of Kistler sensors in the global frame [mm] (n_frames,n_sensors,3)
         kist_origin_base (npt.NDArray): Origin of the Kistler frame in the base configuration, represented in the global frame [mm] (3,)
@@ -408,20 +413,23 @@ def animate_perturbation(
 
     fig = plt.figure(figsize=(16,9), facecolor='white')
     fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.05, wspace=0.15)
-    gs = gridspec.GridSpec(2, 2, width_ratios=[1, 1])
+    gs = gridspec.GridSpec(3, 2, width_ratios=[1, 1])
 
     ax_ang = fig.add_subplot(gs[0, 0])
     ax_mom = fig.add_subplot(gs[1, 0])
+    ax_pert = fig.add_subplot(gs[2, 0])
 
     ax3d = fig.add_subplot(gs[:, 1], projection='3d')
     ax3d.set_axis_off()
 
+    line_datas = [alpha, M_e1, np.degrees(pert_tjct)]
+
     lines = []
     cursors = []
     for ax, data, title in zip(
-        [ax_ang, ax_mom],
-        [alpha, M_e1],
-        ['Ankle Angle', 'Ankle Moment']
+        [ax_ang, ax_mom, ax_pert],
+        line_datas,
+        ['Ankle Angle', 'Ankle Moment', 'Perturbation Trajectory']
     ):
         lines.append(ax.plot([], [], c='b', lw=1.5)[0])
         ax.set_xlim(t[0], t[-1])
@@ -429,14 +437,17 @@ def animate_perturbation(
         ax.set_ylim(np.nanmin(data) - 0.1*rng, np.nanmax(data) + 0.1*rng)
         ax.set_title(title, fontsize=10, loc='left')
         cursors.append(ax.axvline(0, color='k', alpha=0.5, ls=':'))
-
-    line_datas = [alpha, M_e1]
+    
+    rng_pert = np.nanmax(np.degrees(pert_tjct)) - np.nanmin(np.degrees(pert_tjct))
+    if rng_pert < 1.0:
+        mean_pert = np.nanmean(np.degrees(pert_tjct))
+        ax_pert.set_ylim(mean_pert - 1.0, mean_pert + 1.0)
 
     if M_components is not None:
         line_datas.extend(M_components)
-        all_data = np.concatenate(line_datas, axis=0)
-        rng = np.nanmax(all_data) - np.nanmax(all_data)
-        ax.set_ylim(np.nanmin(all_data) - 0.1*rng, np.nanmax(all_data) + 0.1*rng)
+        all_moments = np.concatenate([M_e1] + M_components, axis=0)
+        rng = np.nanmax(all_moments) - np.nanmin(all_moments)
+        ax_mom.set_ylim(np.nanmin(all_moments) - 0.1*rng, np.nanmax(all_moments) + 0.1*rng)
         labels = ['GRF', 'grav', 'inertia']
         colors = ['c', 'm', 'y']
         for i, comp in enumerate(M_components):
@@ -516,6 +527,9 @@ def animate_perturbation(
 
         for l, data in zip(lines, line_datas):
             l.set_data(t[:frame_i+1], data[:frame_i+1])
+
+        for c in cursors:
+            c.set_xdata([t[frame_i]])
 
         return data
     

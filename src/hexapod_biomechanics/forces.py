@@ -186,7 +186,8 @@ class HexKistler:
 
         theta, n = inv_rodrigues(R, tol=1e-3)
 
-        rot = Rotation.from_matrix(self.T_KG[:, :3, :3]) # rotation trajectory of Kistler
+        R_K_rel = self.T_KG[:, :3, :3] @ self.T_KG_neut[:3, :3].T
+        rot = Rotation.from_matrix(R_K_rel) # rotation trajectory of Kistler
         rot_vec = rot.as_rotvec() # (n_frames,3)
 
         if n is None:
