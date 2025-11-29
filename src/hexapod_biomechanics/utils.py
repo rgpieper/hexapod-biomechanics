@@ -84,6 +84,9 @@ def axis_difference(target_axis: Tuple[npt.ArrayLike, npt.ArrayLike], actual_axi
             offset_diff (npt.ArrayLike): Distance between actual reference point/origin and closest point on target axis [mm] (n_frames,) or scalar
     """
 
+    if target_axis[0] is None:
+        raise ValueError("No target axis to match.")
+
     p_t = target_axis[0] # (n_frames, 3) or (3,)
     v_t = normalize(target_axis[1]) # (n_frames, 3) or (3,)
 
