@@ -153,5 +153,7 @@ class AnkleID:
             # Eval moment components
             "M_I": np.sum(M_I_ajc * e1, axis=-1),
             "M_grf": np.sum(M_grf_ajc * e1, axis=-1),
-            "M_grav": np.sum(M_grav_ajc * e1, axis=-1)
+            "M_grav": np.sum(M_grav_ajc * e1, axis=-1),
+            # return filter to filter kinematics
+            "filter": filt
         }
