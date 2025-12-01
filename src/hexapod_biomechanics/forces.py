@@ -71,7 +71,8 @@ class HexKistler:
                 'moment_origin' (npt.NDArray): Moment components in global frame represented at global origin [N*mm] (n_frames,3)
                 'COP' (npt.NDArray): Center of pressure coordinates in global frame [mm] (n_frames,3)
                 'moment_free' (npt.NDArray): Free moment (friction) components at COP in global frame [N*mm] (n_frames,3)
-                'moment_free_scalar' (float): Magnitude of free moment [N*mm].
+                'moment_free_scalar' (float): Magnitude of free moment [N*mm]
+                'is_stance' (npt.NDArray): Mask for stance phase in contact with Kistler (n_frames,)
         """
         
         assert cluster_hex.shape[0] == fz1.shape[0], f"Force data length ({fz1.shape[0]}) does not match marker data length ({cluster_hex.shape[0]})."

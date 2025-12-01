@@ -205,6 +205,7 @@ def animate_grf(
         forces (npt.NDArray): Component forces acting on the subject in global frame [N] (n_frames,3)
         COP (npt.NDArray): Center of pressure coordinates in global frame [mm] (n_frames,3)
         moment_free (npt.NDArray): Free moment (twist, frictional) at COP in global frame [N*mm] (n_frames,3)
+        is_stance (npt.NDArray): Mask for stance phase in contact with Kistler (n_frames,)
         corners (npt.NDArray): Coordinate trajectories of the Kistler corners [mm] (n_frames,n_corners,3)
         sensors (npt.NDArray): Coordinate trajectories of the Kistler sensors [mm] (n_frames,n_sensors,3)
         kist_origin_base (npt.NDArray): Origin of the Kistler coordinate system in the base/static configuration [mm] (3,)
