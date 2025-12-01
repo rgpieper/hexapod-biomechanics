@@ -1,5 +1,6 @@
 
 from typing import Tuple, Dict, Optional
+import math
 import numpy as np
 import numpy.typing as npt
 from scipy.signal import savgol_filter
@@ -186,3 +187,95 @@ def differentiate_rotation(
     )
 
     return omega, alpha
+
+def find_pert_thresh(
+        hex_tjct: npt.NDArray,
+        thresh: float,
+        window_length: int,
+        pre_thresh_start: int
+    ) -> npt.NDArray:
+
+    pert_start_idx = None
+    for i, ang in enumerate(hex_tjct):
+        if np.abs(ang) >= thresh:
+            pert_start_idx = i - pre_thresh_start
+            break
+
+    if pert_start_idx is None:
+        raise ValueError("No perturbation found.")
+    
+    pert_end_idx = pert_start_idx + window_length
+
+    mask = np.zeros(len(hex_tjct), dtype=bool)
+    mask[pert_start_idx:pert_end_idx] = True
+    
+    return mask
+
+def trapezoidal_pert(mag: float, dur: float, accel: float, dt: float) -> npt.NDArray:
+    
+    min_accel_req = 4*mag/dur**2
+    if abs(accel) < abs(min_accel_req) or accel*min_accel_req < 0:
+        raise ValueError(
+            "Infeasible trapezoidal profile.\n"
+            f"Insufficient acceleration to re\ach value [{mag}] in time [{dur}].\n"
+            f"  Desired Acceleration: {accel}\n"
+            f"  Minimum Directional Acceleration: {min_accel_req}"
+            )
+    vel_const_candidates = (
+        (accel*dur + math.sqrt((accel*dur)**2 - 4*accel*mag))/2,
+        (accel*dur - math.sqrt((accel*dur)**2 - 4*accel*mag))/2
+    )
+    calc_dur_accel = lambda vel_const: vel_const/accel # calculate duration of acceleration (equal for deceleration)
+    calc_dur_vel = lambda vel_const: dur - 2*calc_dur_accel(vel_const) # calculate duration of constant velocity
+    vel_const = max(vel_const_candidates, key=calc_dur_vel) # constant (maximum) velocity
+    dur_accel = calc_dur_accel(vel_const)
+    dur_vel = calc_dur_vel(vel_const)
+
+    n_steps = math.ceil(dur/dt) # number of time steps, ensuring t_final >= duration
+    t = np.linspace(dt, dt*n_steps, n_steps)
+    value = np.piecewise(
+        t,
+        [
+            np.logical_and(t > 0.0, t <= dur_accel), # acceleration period
+            np.logical_and(t > dur_accel, t <= dur_accel + dur_vel), # constant velocity period
+            np.logical_and(t > dur_accel + dur_vel, t <= dur) # deceleration period
+        ],
+        [
+            lambda t: 1/2*accel*t**2, # acceleration period
+            lambda t: 1/2*accel*dur_accel**2 + vel_const*(t - dur_accel), # constant velocity period
+            # d_dec(t>(t_a+t_v)) = 1/2 * a * t_a + v_c * t_c + v_c * (t - t_a - t_c) - 1/2 * a * (t - t_a - t_c)^2
+            lambda t: mag - 1/2*accel*(dur - t)**2, # deceleration period
+            dur # default value
+        ]
+    )
+
+    return t, value
+
+def find_pert_template(
+        t: npt.NDArray,
+        hex_tjct: npt.NDArray,
+        window_length: int,
+        pert_mag: float,
+        pert_acc: float,
+        pert_dur: float = 0.075
+) -> npt.NDArray:
+    
+    dt = np.mean(np.diff(t)) # sample period [sec]
+    
+    _, template_tjct = trapezoidal_pert(mag=pert_mag, dur=pert_dur, accel=pert_acc, dt=dt)
+    hex_tjct_deg = np.degrees(hex_tjct)
+
+    N = len(hex_tjct_deg)
+    M = len(template_tjct)
+
+    ssds = []
+    for i in range(N - M + 1):
+        meas_window = hex_tjct_deg[i:i+M]
+        ssds.append(np.sum((meas_window - template_tjct)**2))
+    start_idx = np.argmin(ssds)
+
+    end_idx = start_idx + window_length
+    mask = np.zeros(len(hex_tjct_deg), dtype=bool)
+    mask[start_idx:end_idx] = True
+
+    return mask, template_tjct
