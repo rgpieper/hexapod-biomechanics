@@ -186,6 +186,7 @@ def animate_grf(
         forces: npt.NDArray,
         COP: npt.NDArray,
         moment_free: npt.NDArray,
+        is_stance: npt.NDArray,
         corners: npt.NDArray,
         sensors: npt.NDArray,
         kist_origin_base: npt.NDArray,
@@ -193,7 +194,6 @@ def animate_grf(
         markers: npt.NDArray,
         speed: float = 1.0,
         animation_fps: int = 30,
-        stance_thresh: float = 18.0,
         force_scale: float = 0.5,
         moment_scale: float = 0.05,
         filename: Optional[str] = None
@@ -227,8 +227,6 @@ def animate_grf(
 
     frame_step = fs_data / fs_animation
     ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
-
-    is_stance = forces[:,2] >= stance_thresh # 18N threshold
 
     fig = plt.figure(figsize=(16,9), facecolor='white')
     fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.05, wspace=0.15)

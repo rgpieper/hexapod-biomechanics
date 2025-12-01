@@ -108,7 +108,8 @@ class HexKistler:
 
         # compute COP only when force plate is loaded
         Fz_load = Fz_K.copy()
-        Fz_load[np.abs(Fz_load) < stance_thresh] = np.nan
+        is_stance = np.abs(Fz_load) >= stance_thresh
+        Fz_load[~is_stance] = np.nan
 
         # compute COP in Kistler frame
         COPx_K = -My_surf / Fz_load
@@ -129,7 +130,8 @@ class HexKistler:
             "moment_origin": M,
             "COP": COP,
             "moment_free": M_free,
-            "moment_free_scalar": M_free_scalar
+            "moment_free_scalar": M_free_scalar,
+            "is_stance": is_stance
         }
     
     def track_plate(self) -> Tuple[npt.NDArray, npt.NDArray]:
