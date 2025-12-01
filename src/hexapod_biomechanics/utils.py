@@ -249,33 +249,25 @@ def trapezoidal_pert(mag: float, dur: float, accel: float, dt: float) -> npt.NDA
         ]
     )
 
-    return t, value
+    return value, t
 
 def find_pert_template(
-        t: npt.NDArray,
         hex_tjct: npt.NDArray,
-        window_length: int,
-        pert_mag: float,
-        pert_acc: float,
-        pert_dur: float = 0.075
+        template_tjct: npt.NDArray,
+        window_length: int
 ) -> npt.NDArray:
-    
-    dt = np.mean(np.diff(t)) # sample period [sec]
-    
-    _, template_tjct = trapezoidal_pert(mag=pert_mag, dur=pert_dur, accel=pert_acc, dt=dt)
-    hex_tjct_deg = np.degrees(hex_tjct)
 
-    N = len(hex_tjct_deg)
+    N = len(hex_tjct)
     M = len(template_tjct)
 
     ssds = []
     for i in range(N - M + 1):
-        meas_window = hex_tjct_deg[i:i+M]
+        meas_window = hex_tjct[i:i+M]
         ssds.append(np.sum((meas_window - template_tjct)**2))
     start_idx = np.argmin(ssds)
 
     end_idx = start_idx + window_length
-    mask = np.zeros(len(hex_tjct_deg), dtype=bool)
+    mask = np.zeros(len(hex_tjct), dtype=bool)
     mask[start_idx:end_idx] = True
 
-    return mask, template_tjct
+    return mask
