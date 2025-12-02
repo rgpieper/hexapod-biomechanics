@@ -193,7 +193,23 @@ def find_pert_thresh(
         thresh: float,
         window_length: int,
         pre_thresh_start: int
-    ) -> npt.NDArray:
+    ) -> Tuple[npt.NDArray, int]:
+    """Locate perturbation in measured hexapod orientation trajectory as threshold on that trajectory.
+
+    Args:
+        hex_tjct (npt.NDArray): Measured hexapod angle / orientation [units]
+        thresh (float): Threshold for detecting perturbation [units]. Units must agree with hex_tjct.
+        window_length (int): Desired perturbation window lenth [timepoints]
+        pre_thresh_start (int): "Backup" period before crossing threshold to consider start of perturbation [timepoints]
+
+    Raises:
+        ValueError: No perturbation found that eclipses prescribed threshold.
+
+    Returns:
+        Tuple[npt.NDArray, int]:
+            'mask' (npt.NDArray): Masking array for isolating perturbation from hex_tjct (and associated trajectories).
+            'pert_start_idx' (int): Index where perturbation starts.
+    """
 
     pert_start_idx = None
     for i, ang in enumerate(hex_tjct):
@@ -209,9 +225,31 @@ def find_pert_thresh(
     mask = np.zeros(len(hex_tjct), dtype=bool)
     mask[pert_start_idx:pert_end_idx] = True
     
-    return mask
+    return mask, pert_start_idx
 
-def trapezoidal_pert(mag: float, dur: float, accel: float, dt: float) -> npt.NDArray:
+def trapezoidal_pert(
+        dt: float,
+        mag: float = 2.0,
+        dur: float = 0.075,
+        accel: float = 1450.0
+    ) -> Tuple[npt.NDArray, npt.NDArray]:
+    """Built trapedoidal ramp profile, constructed in the same manner as hexapod perturbations.
+
+    Args:
+        dt (float): Trajectory time step [sec]
+        mag (float, optional): Trajectory magnitude [units]. Defaults to 2.0.
+        dur (float, optional): Trajectory duration [sec]. Defaults to 0.075.
+        accel (float, optional): Trajectory acceleration [units/sec/sec]. Sign must agree with 'mag'. Defaults to 1450.0.
+
+    Raises:
+        ValueError: Prescribed acceleration insufficient for reaching magnitude in time."
+
+    Returns:
+        Tuple[npt.NDArray, npt.NDArray]: 
+            'value' (npt.NDArray): Perturbation trajectory [units]
+            't' (npt.NDArray): Associated time vector [sec]
+    """
+    
     
     min_accel_req = 4*mag/dur**2
     if abs(accel) < abs(min_accel_req) or accel*min_accel_req < 0:
@@ -255,7 +293,19 @@ def find_pert_template(
         hex_tjct: npt.NDArray,
         template_tjct: npt.NDArray,
         window_length: int
-) -> npt.NDArray:
+) -> Tuple[npt.NDArray, int]:
+    """Locate perturbation in measured hexapod orientation trajectory by fitting it to a template trajectory.
+
+    Args:
+        hex_tjct (npt.NDArray): Measured hexapod angle / orientation [units]
+        template_tjct (npt.NDArray): Template / expected hexapod angle / orientation [units]. Units must agree with hex_tjct.
+        window_length (int): Desired perturbation window lenth [timepoints]
+
+    Returns:
+        Tuple[npt.NDArray, int]: 
+            'mask' (npt.NDArray): Masking array for isolating perturbation from hex_tjct (and associated trajectories).
+            'start_idx' (int): Index where perturbation starts.
+    """
 
     N = len(hex_tjct)
     M = len(template_tjct)
@@ -270,4 +320,4 @@ def find_pert_template(
     mask = np.zeros(len(hex_tjct), dtype=bool)
     mask[start_idx:end_idx] = True
 
-    return mask
+    return mask, start_idx
