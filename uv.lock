@@ -348,6 +348,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "c3d" },
+    { name = "h5py" },
     { name = "hexapod-inertial-force-removal" },
     { name = "ipykernel" },
     { name = "ipympl" },
@@ -361,6 +362,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "c3d", specifier = ">=0.6.0" },
+    { name = "h5py", specifier = ">=3.15.1" },
     { name = "hexapod-inertial-force-removal", git = "ssh://git@github.com/rgpieper/hexapod-inertial-force-removal.git" },
     { name = "ipykernel", specifier = ">=7.1.0" },
     { name = "ipympl", specifier = ">=0.9.8" },
