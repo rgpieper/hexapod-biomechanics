@@ -5,6 +5,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation, RotationSpline
+from scipy.constants import g
 
 def rigid_transform(base_points: npt.NDArray, dynamic_points: npt.NDArray) -> npt.NDArray:
     """Compute transformation of a dynamic rigid body relative to a base configuration.
@@ -321,3 +322,23 @@ def find_pert_template(
     mask[start_idx:end_idx] = True
 
     return mask, start_idx
+
+def get_body_mass(
+        fx12_static: npt.ArrayLike,
+        fx34_static: npt.ArrayLike,
+        fy14_static: npt.ArrayLike,
+        fy23_static: npt.ArrayLike,
+        fz1_static: npt.ArrayLike,
+        fz2_static: npt.ArrayLike,
+        fz3_static: npt.ArrayLike,
+        fz4_static: npt.ArrayLike
+) -> float:
+
+    fx = fx12_static + fx34_static
+    fy = fy14_static + fy23_static
+    fz = fz1_static + fz2_static + fz3_static + fz4_static
+    F_vec = np.column_stack([fx, fy, fz])
+    F_avg = np.mean(np.linalg.norm(F_vec, axis=-1))
+    body_mass = F_avg / g
+
+    return body_mass
