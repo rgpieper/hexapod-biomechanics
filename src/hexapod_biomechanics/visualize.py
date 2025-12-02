@@ -53,6 +53,7 @@ def animate_ankle_kinematics(
 
     frame_step = fs_data / fs_animation
     ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
+    ani_f_idx = ani_f_idx[:-1] if ani_f_idx == t.shape[0] else ani_f_idx # prevent index error due to rounding
 
     alpha = np.degrees(alpha) # [deg]
     beta = np.degrees(beta)
