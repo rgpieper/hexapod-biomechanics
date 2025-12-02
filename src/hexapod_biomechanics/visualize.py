@@ -53,7 +53,7 @@ def animate_ankle_kinematics(
 
     frame_step = fs_data / fs_animation
     ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
-    ani_f_idx = ani_f_idx[:-1] if ani_f_idx == t.shape[0] else ani_f_idx # prevent index error due to rounding
+    ani_f_idx = ani_f_idx[:-1] if ani_f_idx[-1] == t.shape[0] else ani_f_idx # prevent index error due to rounding
 
     alpha = np.degrees(alpha) # [deg]
     beta = np.degrees(beta)
@@ -229,6 +229,7 @@ def animate_grf(
 
     frame_step = fs_data / fs_animation
     ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
+    ani_f_idx = ani_f_idx[:-1] if ani_f_idx[-1] == t.shape[0] else ani_f_idx # prevent index error due to rounding
 
     fig = plt.figure(figsize=(16,9), facecolor='white')
     fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.05, wspace=0.15)
@@ -408,6 +409,7 @@ def animate_perturbation(
 
     frame_step = fs_data / fs_animation
     ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
+    ani_f_idx = ani_f_idx[:-1] if ani_f_idx[-1] == t.shape[0] else ani_f_idx # prevent index error due to rounding
 
     alpha = np.degrees(alpha)
 
