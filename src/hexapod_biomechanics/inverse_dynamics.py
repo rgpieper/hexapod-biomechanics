@@ -142,12 +142,8 @@ class AnkleID:
         return {
             "M_ank": M_ank,
             "F_ank": F_ank,
-            "M_e1": M_e1,
-            "M_e2": M_e2,
-            "M_e3": M_e3,
-            "F_e1": F_e1,
-            "F_e2": F_e2,
-            "F_e3": F_e3,
+            "M_jcs": np.column_stack([M_e1, M_e2, M_e3]),
+            "F_jcs": np.column_stack([F_e1, F_e2, F_e3]),
             "omega_F": omega_F,
             "alpha_F": alpha_F,
             # Eval moment components
