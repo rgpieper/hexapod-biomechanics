@@ -139,13 +139,23 @@ class AnkleID:
         F_e2 = np.sum(F_ank * e2, axis=-1)
         F_e3 = np.sum(F_ank * e3, axis=-1)
 
+        omega_G = (R_F @ omega_F[..., np.newaxis]).squeeze()
+        omega_e1 = np.sum(omega_G * e1, axis=1) # foot angular velocity about dorsiflexion/plantarflexion axis
+        omega_e2 = np.sum(omega_G * e2, axis=1) # foot angular velocity about inversion/eversion axis
+        omega_e3 = np.sum(omega_G * e3, axis=1) # foot angular velocity about internal/external rotation axis
+        alpha_G = (R_F @ alpha_F[..., np.newaxis]).squeeze()
+        alpha_e1 = np.sum(alpha_G * e1, axis=1) # foot angular acceleration about dorsiflexion/plantarflexion axis
+        alpha_e2 = np.sum(alpha_G * e2, axis=1) # foot angular acceleration about inversion/eversion axis
+        alpha_e3 = np.sum(alpha_G * e3, axis=1) # foot angular acceleration about internal/external rotation axis
+
+
         return {
             "M_ank": M_ank,
             "F_ank": F_ank,
             "M_jcs": np.column_stack([M_e1, M_e2, M_e3]),
             "F_jcs": np.column_stack([F_e1, F_e2, F_e3]),
-            "omega_F": omega_F,
-            "alpha_F": alpha_F,
+            "omega_foot_jcs": np.column_stack([omega_e1, omega_e2, omega_e3]),
+            "alpha_foot_jcs": np.column_stack([alpha_e1, alpha_e2, alpha_e3]),
             # Eval moment components
             "M_I": np.sum(M_I_ajc * e1, axis=-1),
             "M_grf": np.sum(M_grf_ajc * e1, axis=-1),
