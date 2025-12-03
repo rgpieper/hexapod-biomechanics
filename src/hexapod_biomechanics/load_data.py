@@ -101,8 +101,28 @@ class C3DMan:
 
                 interp_points = np.empty((len(t_analogs), len(point_indices), 3))
 
-                f = interp1d(t_points, raw_points, axis=0, kind='cubic', fill_value='extrapolate')
-                interp_points = f(t_analogs)
+                for m in range(len(point_indices)):
+                    raw_point = raw_points[:, m, :]
+                    if np.isnan(raw_point).any():
+                        valid = ~(np.isnan(raw_point).any(axis=-1))
+                        f = interp1d(
+                            t_points[valid],
+                            raw_point[valid],
+                            axis=0,
+                            kind='cubic',
+                            bounds_error=False,
+                            fill_value=np.nan # if nan points, fill ends with nans
+                        )
+                    else:
+                        f = interp1d(
+                            t_points,
+                            raw_point,
+                            axis=0,
+                            kind='cubic',
+                            bounds_error=False,
+                            fill_value='extrapolate' # if no invalid points, extrapolate
+                        )
+                    interp_points[:, m, :] = f(t_analogs)
 
                 return interp_points, t_analogs
             
