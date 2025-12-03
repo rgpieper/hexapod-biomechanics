@@ -73,6 +73,7 @@ class HexKistler:
                 'moment_free' (npt.NDArray): Free moment (friction) components at COP in global frame [N*mm] (n_frames,3)
                 'moment_free_scalar' (float): Magnitude of free moment [N*mm]
                 'is_stance' (npt.NDArray): Mask for stance phase in contact with Kistler (n_frames,)
+                'hex_tjct' (npt.NDArray): Angular position trajectory of Hexapod/Kistler [radians] (n_frames,)
         """
         
         assert cluster_hex.shape[0] == fz1.shape[0], f"Force data length ({fz1.shape[0]}) does not match marker data length ({cluster_hex.shape[0]})."
@@ -126,13 +127,20 @@ class HexKistler:
         plate_normal = (R_KG @ np.array([0, 0, 1])).squeeze()
         M_free = plate_normal * M_free_scalar[:, np.newaxis] # (n_frames, 3) @ (n_frames, 1)
 
+        # compute hexapod trajectory (about x-axis)
+        R_K_rel = self.T_KG[:, :3, :3] @ self.T_KG_neut[:3, :3].T
+        rot = Rotation.from_matrix(R_K_rel) # rotation trajectory of Kistler
+        rot_vec = rot.as_rotvec() # (n_frames,3)
+        theta_tjct = rot_vec[:,0]
+
         return {
             "force": F,
             "moment_origin": M,
             "COP": COP,
             "moment_free": M_free,
             "moment_free_scalar": M_free_scalar,
-            "is_stance": is_stance
+            "is_stance": is_stance,
+            "hex_tjct": theta_tjct
         }
     
     def track_plate(self) -> Tuple[npt.NDArray, npt.NDArray]:
@@ -175,7 +183,6 @@ class HexKistler:
                 'origin' (npt.NDArray): Axis reference point nearest to base/neutral Kistler origin [mm] (3,)
                 'direction' (npt.NDArray): Unit vector axis of rotation (3,)
                 'angle' (float): Rotation magnitude [radians]
-                'angle_tjct' (npt.NDArray): Angular position trajectory of Hexapod/Kistler [radians] (n_frames,)
         """
 
         if len(cluster_hex_pert.shape) == 3: # frame dimension included (n_frames,n_markers,3)
@@ -189,16 +196,11 @@ class HexKistler:
 
         theta, n = inv_rodrigues(R, tol=1e-3)
 
-        R_K_rel = self.T_KG[:, :3, :3] @ self.T_KG_neut[:3, :3].T
-        rot = Rotation.from_matrix(R_K_rel) # rotation trajectory of Kistler
-        rot_vec = rot.as_rotvec() # (n_frames,3)
-
         if n is None:
             return {
                 "origin": None,
                 "direction": n,
                 "max_angle": theta,
-                "angle_tjct": np.linalg.norm(rot_vec, axis=1) # if no axis found, report norm of rotation vector [rad] (n_frames,)
             }
 
         # tranfromation: p_end = T*p_start_hom = R*p_start + x
@@ -214,11 +216,8 @@ class HexKistler:
         slide = np.dot(p_to_K, n) # project vector onto rotational axis
         p_near_K = p_near_orig + (slide * n) # slide reference point along rotation axis to near neutral Kistler origin
 
-        theta_tjct = np.sum(rot_vec * n, axis=1) # rotation about the principle Kistler rotation axis [rad] (n_frames,)
-
         return {
             "origin": p_near_K,
             "direction": n,
             "max_angle": theta,
-            "angle_tjct": theta_tjct
         }
