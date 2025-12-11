@@ -1,10 +1,21 @@
 
-from typing import List, Tuple
+from typing import List, Tuple, TypedDict
 import c3d
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from scipy.interpolate import interp1d
+
+class GenAnalogParams(TypedDict):
+    gain: float
+    zero_level: float
+    scaling_factor: float
+
+class AccelerometerParams(TypedDict):
+    gain: float
+    zero_level: float
+    sensitivity: float
+    amplifier_gain: float
 
 class C3DMan:
     """C3D Manager:
@@ -162,5 +173,37 @@ class C3DMan:
                 current_row = end_row
 
             return sel_analogs, t_analogs
+        
+def convert_accel(
+        accel_data: npt.NDArray,
+        gen_params: GenAnalogParams = {
+            "gain": 5.00, # V
+            "zero_level": 0.0,
+            "scaling_factor": 1.0 # V
+        },
+        acc_params: AccelerometerParams = {
+            "gain": 5.00, # V
+            "zero_level": 2.5,
+            "sensitivity": 1000.0, # mV/g
+            "amplifier_gain": 1.0 # V
+        }
+) -> npt.NDArray:
+    """Convert extracted acceleromter data as acceleration values from accelerometer devices to electric potential from generic analog devices.
 
+    Induced force prediction model trained on raw electric potential accelerometer data.
 
+    Args:
+        accel_data (npt.NDArray): Accelerometer data represented as acceleration (m/s)
+        gen_params (GenAnalogParams, optional): Parameters defining how accelerometers are read as generic analog devices. Defaults to { "gain": 5.00, # V "zero_level": 0.0, "scaling_factor": 1.0 # V }.
+        acc_params (AccelerometerParams, optional): Parameters defining how accelerometers are read as accelerometer devices. Defaults to { "gain": 5.00, # V "zero_level": 2.5, "sensitivity": 1000.0, # mV/g "amplifier_gain": 1.0 # V }.
+
+    Returns:
+        npt.NDArray: Acceleromater data converted to raw electrical potential (V)
+    """
+    
+    raw_accel_potential = gen_params["scaling_factor"]*(
+        (accel_data*(acc_params["sensitivity"]/1000.0)/acc_params["amplifier_gain"] + 
+            acc_params["zero_level"])*acc_params["gain"]/gen_params["gain"] - 
+            gen_params["zero_level"])
+    
+    return raw_accel_potential
