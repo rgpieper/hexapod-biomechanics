@@ -5,6 +5,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from scipy.interpolate import interp1d
+from scipy.constants import g
 
 class GenAnalogParams(TypedDict):
     gain: float
@@ -200,10 +201,11 @@ def convert_accel(
     Returns:
         npt.NDArray: Acceleromater data converted to raw electrical potential (V)
     """
-    
-    raw_accel_potential = gen_params["scaling_factor"]*(
-        (accel_data*(acc_params["sensitivity"]/1000.0)/acc_params["amplifier_gain"] + 
-            acc_params["zero_level"])*acc_params["gain"]/gen_params["gain"] - 
-            gen_params["zero_level"])
+
+    accel_g = accel_data / g # (g), acceleration as scale of gravity
+    sensor_voltage = accel_g * (acc_params["sensitivity"] / 1000.0) # (V), voltage mapped to acceleration
+    amplified_voltage = sensor_voltage * acc_params["amplifier_gain"] # (V), voltage seen by ADC (without zero level offset)
+    total_voltage = amplified_voltage + acc_params["zero_level"] # (V), add zero level back into signal
+    raw_accel_potential = gen_params["scaling_factor"] * (total_voltage - gen_params["zero_level"]) # (V), convert to generic analog representation
     
     return raw_accel_potential
