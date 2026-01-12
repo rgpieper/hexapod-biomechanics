@@ -16,8 +16,10 @@ dependencies = [
     "ipympl>=0.9.8",
     "ipython>=9.7.0",
     "matplotlib>=3.10.7",
+    "nbformat>=5.10.4",
     "numpy>=2.3.5",
     "pandas>=2.3.3",
+    "plotly>=6.5.1",
     "scipy>=1.16.3",
 ]
 
