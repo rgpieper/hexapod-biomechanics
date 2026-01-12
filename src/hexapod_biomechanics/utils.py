@@ -192,9 +192,7 @@ def differentiate_rotation(
 def find_pert_thresh(
         hex_tjct: npt.NDArray,
         thresh: float,
-        window_length: int,
-        pre_thresh_start: int
-    ) -> Tuple[npt.NDArray, int]:
+    ) -> int:
     """Locate perturbation in measured hexapod orientation trajectory as threshold on that trajectory.
 
     Args:
@@ -215,18 +213,13 @@ def find_pert_thresh(
     pert_start_idx = None
     for i, ang in enumerate(hex_tjct):
         if np.abs(ang) >= thresh:
-            pert_start_idx = i - pre_thresh_start
+            pert_start_idx = i
             break
 
     if pert_start_idx is None:
         raise ValueError("No perturbation found.")
     
-    pert_end_idx = pert_start_idx + window_length
-
-    mask = np.zeros(len(hex_tjct), dtype=bool)
-    mask[pert_start_idx:pert_end_idx] = True
-    
-    return mask, pert_start_idx
+    return pert_start_idx
 
 def trapezoidal_pert(
         dt: float,
@@ -293,8 +286,7 @@ def trapezoidal_pert(
 def find_pert_template(
         hex_tjct: npt.NDArray,
         template_tjct: npt.NDArray,
-        window_length: int
-) -> Tuple[npt.NDArray, int]:
+) -> int:
     """Locate perturbation in measured hexapod orientation trajectory by fitting it to a template trajectory.
 
     Args:
@@ -317,11 +309,7 @@ def find_pert_template(
         ssds.append(np.sum((meas_window - template_tjct)**2))
     start_idx = np.argmin(ssds)
 
-    end_idx = start_idx + window_length
-    mask = np.zeros(len(hex_tjct), dtype=bool)
-    mask[start_idx:end_idx] = True
-
-    return mask, start_idx
+    return start_idx
 
 def get_body_mass(
         fx12_static: npt.ArrayLike,
