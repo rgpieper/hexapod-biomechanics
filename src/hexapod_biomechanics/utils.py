@@ -164,28 +164,79 @@ def differentiate_rotation(
             omega (npt.NDArray): 3D angular velocity represented in body frame [rad/s] (n_frames,3)
             alpha (npt.NDArray): 3D angular acceleration represented in body frame [rad/s/s] (n_frames,3)
     """
-    
-    rot = Rotation.from_matrix(R)
-    spline = RotationSpline(time, rot)
-    omega_raw = spline(time, order=1) # angular velocity in the body frame
 
     dt = np.mean(np.diff(time)) # sample period
 
-    omega = savgol_filter(
-        omega_raw,
+    quats = Rotation.from_matrix(R).as_quat() # convert rotation matrix to quaternions for pre-filtering (continuous) (n_frames,4)
+
+    for i in range(1, len(quats)):
+        if np.dot(quats[i], quats[i-1]) < 0:
+            quats[i] = -quats[i] # q and -q represent the same rotation, but must ensure the trajectory is continuous before filtering
+
+    q_filt = savgol_filter( # orientation quaternions, unnormalized
+        quats,
         window_length=filt_window,
         polyorder=filt_poly,
         deriv=0,
         axis=0
     )
-    alpha = savgol_filter(
-        omega_raw,
+
+    dq_raw = savgol_filter( # first derivative of quaternions
+        quats,
         window_length=filt_window,
         polyorder=filt_poly,
         deriv=1,
         delta=dt,
         axis=0
     )
+
+    ddq_raw = savgol_filter( # second derivative of quaternions
+        quats,
+        window_length=filt_window,
+        polyorder=filt_poly,
+        deriv=2,
+        delta=dt,
+        axis=0
+    )
+
+    # Geometric Correction: project raw derivatives back onto the unit hypersphere surface
+    norms = np.linalg.norm(q_filt, axis=1, keepdims=True)
+    q = q_filt/norms # re-normalize orientation quaternions
+    # project first derivative: dq = (1/n) * (dq_raw - (q . dq_raw) * q)
+    # (subtract component of raw quaternion derivative that is parallel to the orientation quaternion to flatten the derivative to be tangent to the hypersphere)
+    q_dot_dq_raw = np.sum(q * dq_raw, axis=1, keepdims=True)
+    dq = (dq_raw - q_dot_dq_raw * q) / norms
+    # project second derivative: ddq = (1/n) * (ddq_raw - ((q . ddq_raw) + (dq . dq_raw)) * q - (q . dq_raw) * dq)
+    # differentiation of expression to project the first derivative (w product and quotient rules) (accounts for hypersphere curvature)
+    q_dot_ddq_raw = np.sum(q * ddq_raw, axis=1, keepdims=True)
+    dq_dot_dq_raw = np.sum(dq * dq_raw, axis=1, keepdims=True)
+    q_dot_dq_raw = np.sum(q * dq_raw, axis=1, keepdims=True)
+    ddq = (ddq_raw - (q_dot_ddq_raw + dq_dot_dq_raw) * q - q_dot_dq_raw * dq) / norms
+
+    def quat_mult(q1: npt.NDArray, q2: npt.NDArray) -> npt.NDArray:
+        """Compute vectorized Hamilton product
+
+        Args:
+            q1 (npt.NDArray): first quaternion of product (n_frames,4)
+            q2 (npt.NDArray): second quaternion of product (n_frames,4)
+
+        Returns:
+            npt.NDArray: vectorized Hamilton product (n_frames,4)
+        """
+        x1, y1, z1, w1 = q1.T
+        x2, y2, z2, w2 = q2.T
+        return np.column_stack((
+            w1*x2 + x1*w2 + y1*z2 - z1*y2,
+            w1*y2 - x1*z2 + y1*w2 + z1*x2,
+            w1*z2 + x1*y2 - y1*x2 + z1*w2,
+            w1*w2 - x1*x2 - y1*y2 - z1*z2
+        ))
+    
+    q_conj = q * np.array([-1, -1, -1, 1])
+    dq_conj = dq * np.array([-1, -1, -1, 1])
+
+    omega = 2.0 * quat_mult(q_conj, dq)[:,:3] # relationship between unit quaternion and body frame angular velocity (n_frames,3)
+    alpha = 2.0 * (quat_mult(dq_conj, dq) + quat_mult(q_conj, ddq))[:,:3] # time derivative of the velocity equation (via product rule) (n_frames,3)
 
     return omega, alpha
 
