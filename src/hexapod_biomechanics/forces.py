@@ -41,28 +41,14 @@ class HexKistler:
     def process_forces(
             self,
             cluster_hex: npt.NDArray,
-            fx12: npt.NDArray,
-            fx34: npt.NDArray,
-            fy14: npt.NDArray,
-            fy23: npt.NDArray,
-            fz1: npt.NDArray,
-            fz2: npt.NDArray,
-            fz3: npt.NDArray,
-            fz4: npt.NDArray,
+            raw_forces: npt.NDArray,
             stance_thresh: float = 18.0
     ) -> Dict[str, npt.NDArray]:
         """Convert raw forces to ground reaction force parameters, accounting for transformation of the Hexapod.
 
         Args:
             cluster_hex (npt.NDArray): Hexapod marker trajectories [mm] (n_frames,n_markers,3)
-            fx12 (npt.NDArray): Raw x-direction force acting on Kistler between sensors 1 and 2 [N] (n_frames,)
-            fx34 (npt.NDArray): Raw x-direction force acting on Kistler between sensros 3 and 4 [N] (n_frames,)
-            fy14 (npt.NDArray): Raw y-direction force acting on Kistler between sensors 1 and 4 [N] (n_frames,)
-            fy23 (npt.NDArray): Raw y-direction force acting on Kistler between sensors 2 and 3 [N] (n_frames,)
-            fz1 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 1 [N] (n_frames,)
-            fz2 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 2 [N] (n_frames,)
-            fz3 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 3 [N] (n_frames,)
-            fz4 (npt.NDArray): Raw z-direction force acting on Kistler at sensor 4 [N] (n_frames,)
+            raw_forces (npt.NDArray): Raw forces acting on Kistler from ordered channels: [FX12, FX34, FY14, FY23, FZ1, FZ2, FZ3, FZ4] [N] (n_frames,8)
             stance_thresh (float, optional): Vertical (z) force at which subject is in stance on Hexapod, when COP will be computed [N]. Defaults to 18.0.
 
         Returns:
@@ -76,14 +62,24 @@ class HexKistler:
                 'hex_tjct' (npt.NDArray): Angular position trajectory of Hexapod/Kistler [radians] (n_frames,)
         """
         
-        assert cluster_hex.shape[0] == fz1.shape[0], f"Force data length ({fz1.shape[0]}) does not match marker data length ({cluster_hex.shape[0]})."
-        n_frames = fz1.shape[0]
+        assert cluster_hex.shape[0] == raw_forces.shape[0], f"Force data length ({raw_forces.shape[0]}) does not match marker data length ({cluster_hex.shape[0]})."
+        n_frames = raw_forces.shape[0]
 
         # Kistler transformation
         T_H_move = rigid_transform(self.cluster_hex_base, cluster_hex) # hexapod movement from base to dynamic (n_frames, 4, 4)
         self.T_KG = T_H_move @ self.T_KG_neut # dynamic Kistler coordinate system (n_frames, 4, 4)
         R_KG = self.T_KG[:, :3, :3] # just rotation (n_frames, 3, 3)
         o_KG = self.T_KG[:, :3, 3] # translation (Kistler origin in global frame) (n_frames, 3)
+
+        # extract force channels
+        fx12 = raw_forces[:,0]
+        fx34 = raw_forces[:,1]
+        fy14 = raw_forces[:,2]
+        fy23 = raw_forces[:,3]
+        fz1 = raw_forces[:,4]
+        fz2 = raw_forces[:,5]
+        fz3 = raw_forces[:,6]
+        fz4 = raw_forces[:,7]
 
         # resultant forces in Kistler frame
         Fx_K = (-fx12) + (-fx34)
