@@ -551,3 +551,167 @@ def animate_perturbation(
     plt.close()
 
     return anim
+
+def animate_demo(
+        t: npt.NDArray,
+        alpha: npt.NDArray,
+        M_e1: npt.NDArray,
+        o_ajc: npt.NDArray,
+        e1: npt.NDArray,
+        e2: npt.NDArray,
+        T_T: npt.NDArray,
+        pert_tjct: npt.NDArray,
+        corners: npt.NDArray,
+        kist_origin_base: npt.NDArray,
+        side: int,
+        markers: npt.NDArray,
+        speed: float = 1.0,
+        animation_fps: int = 30,
+        filename: Optional[str] = None
+) -> animation.FuncAnimation:
+    
+    fs_data = 1 / np.mean(np.diff(t))
+    fs_animation = animation_fps / speed
+    assert fs_data >= fs_animation, f"Invalid speed & animation rate: data rate is {fs_data:.01f} Hz but {fs_animation:.01f} Hz is required."
+
+    frame_step = fs_data / fs_animation
+    ani_f_idx = np.round(np.arange(0, t.shape[0], frame_step)).astype(int)
+    ani_f_idx = ani_f_idx[:-1] if ani_f_idx[-1] == t.shape[0] else ani_f_idx # prevent index error due to rounding
+
+    alpha = np.degrees(alpha)
+    M_e1 = M_e1 / 1000.0 # convert to Nm (or Nm/kg)
+
+    fig = plt.figure(figsize=(16,9), facecolor='white')
+    fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.05, wspace=0.15)
+    gs = gridspec.GridSpec(3, 2, width_ratios=[1, 1])
+
+    ax_ang = fig.add_subplot(gs[0, 0])
+    ax_mom = fig.add_subplot(gs[1, 0])
+    ax_pert = fig.add_subplot(gs[2, 0])
+
+    ax3d = fig.add_subplot(gs[:, 1], projection='3d')
+    ax3d.set_axis_off()
+
+    line_datas = [alpha, M_e1, np.degrees(pert_tjct)]
+
+    lines = []
+    cursors = []
+    for ax, data, plot_name in zip(
+        [ax_ang, ax_mom, ax_pert],
+        line_datas,
+        ['Ankle Angle (deg)', 'Ankle Moment (Nm/kg)', 'Perturbation Trajectory (deg)']
+    ):
+        lines.append(ax.plot([], [], c='b', lw=1.5)[0])
+        ax.set_xlim(t[0], t[-1])
+        rng = np.nanmax(data) - np.nanmin(data)
+        ax.set_ylim(np.nanmin(data) - 0.1*rng, np.nanmax(data) + 0.1*rng)
+        ax.set_ylabel(plot_name)
+        # ax.set_title(title, fontsize=10, loc='left')
+        cursors.append(ax.axvline(0, color='k', alpha=0.5, ls=':'))
+    ax.set_xlabel('Time (sec)')
+
+    rng_pert = np.nanmax(np.degrees(pert_tjct)) - np.nanmin(np.degrees(pert_tjct))
+    if rng_pert < 1.0:
+        mean_pert = np.nanmean(np.degrees(pert_tjct))
+        ax_pert.set_ylim(mean_pert - 1.0, mean_pert + 1.0)
+
+    z_max = np.nanmax(markers[:, :, 2]) * 1.2
+    z_min = -60
+    r_x = 300
+    r_y = 400
+
+    ax3d.set_xlim(kist_origin_base[0] - r_x, kist_origin_base[0] + r_x)
+    ax3d.set_ylim(kist_origin_base[1] - r_y, kist_origin_base[1] + r_y)
+    ax3d.set_zlim(z_min, z_max)
+
+    ax3d.set_box_aspect((r_x, r_y, (z_max-z_min)/2))
+    if side == 1:
+        ax3d.view_init(elev=20, azim=40)
+    else:
+        ax3d.view_init(elev=10, azim=-20)
+
+    quivers = []
+    scatters = []
+    floor = None
+    plate = None
+
+    def update(frame_i):
+        nonlocal floor
+        nonlocal plate
+
+        if floor:
+            floor.remove()
+        grid_x = np.linspace(kist_origin_base[0] - r_x, kist_origin_base[0] + r_x, 10)
+        grid_y = np.linspace(kist_origin_base[1] - r_y, kist_origin_base[1] + r_y, 10)
+        X, Y = np.meshgrid(grid_x, grid_y)
+        Z = np.zeros_like(X) # assumes ground is at z=0
+        floor = ax3d.plot_wireframe(X, Y, Z, color='gray', alpha=0.3, linewidth=0.5)
+
+        if plate:
+            plate.remove()
+        corner_verts = [list(zip(corners[frame_i, :, 0], corners[frame_i, :, 1], corners[frame_i, :, 2]))]
+        plate = Poly3DCollection(corner_verts, alpha=0.3, facecolor='gray', edgecolor='k')
+        ax3d.add_collection3d(plate)
+
+        for s in scatters:
+            s.remove()
+        scatters.clear()
+
+        s_m = ax3d.scatter(markers[frame_i, :, 0], markers[frame_i, :, 1], markers[frame_i, :, 2], c='k', s=15, alpha=0.6)
+        scatters.append(s_m)
+
+        def add_vec(o: npt.NDArray, v: npt.NDArray, color: str, lw: float = 2, length: float = 40) -> None:
+            """Helper for drawing 3D vectors.
+
+            Args:
+                o (npt.NDArray): Vector origin [mm] (3,)
+                v (npt.NDArray): Vector (3,)
+                color (str): Plotting color.
+                lw (float, optional): Vector linewidth. Defaults to 2.
+                length (float, optional): Vector length [mm]. Defaults to 40.
+            """
+
+            q = ax3d.quiver(
+                o[0], o[1], o[2],
+                v[0], v[1], v[2],
+                color=color, linewidth=lw, length=length, arrow_length_ratio=0.2
+            )
+            quivers.append(q)
+
+        for q in quivers:
+            q.remove()
+        quivers.clear()
+
+        o_ank = o_ajc[frame_i] # (3,)
+        v_ax_ank = e1[frame_i] # (3,)
+        v_e2 = e2[frame_i] # (3,)
+        v_xT = T_T[frame_i, :3, 0] # (3,)
+        
+        add_vec(o_ank, v_ax_ank, 'black', lw=3, length=100)
+        add_vec(o_ank, v_e2, 'green', lw=2, length=100)
+        add_vec(o_ank, v_xT, 'red', lw=2, length=100)
+
+        for l, data in zip(lines, line_datas):
+            l.set_data(t[:frame_i+1], data[:frame_i+1])
+
+        for c in cursors:
+            c.set_xdata([t[frame_i]])
+
+        return data
+    
+    anim = animation.FuncAnimation(
+        fig,
+        update,
+        frames=ani_f_idx,
+        interval=1000/animation_fps,
+        blit=False
+    )
+
+    if filename:
+        print(f"Saving to {filename}")
+        writer = 'pillow' if filename.endswith('.gif') else 'ffmpeg'
+        anim.save(filename, writer=writer, fps=animation_fps)
+    
+    plt.close()
+
+    return anim
