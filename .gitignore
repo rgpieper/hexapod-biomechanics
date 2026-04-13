@@ -16,4 +16,11 @@ models/
 # Scratchpad notebook for demo
 notebooks/scratchpad.ipynb
 
+# Sandbox / throwaway scripts
+.sandbox/
+
 .DS_Store
+
+# Session artifacts (not project history)
+CLAUDE.local.md
+refactor-plan.md
