@@ -11,7 +11,6 @@ requires-python = ">=3.12"
 dependencies = [
     "c3d>=0.6.0",
     "h5py>=3.15.1",
-    "hexapod-inertial-force-removal",
     "ipykernel>=7.1.0",
     "ipympl>=0.9.8",
     "ipython>=9.7.0",
@@ -22,10 +21,8 @@ dependencies = [
     "plotly>=6.5.1",
     "scipy>=1.16.3",
     "tomli-w>=1.2.0",
+    "torch>=2.9.1",
 ]
-
-[tool.uv.sources]
-hexapod-inertial-force-removal = { git = "ssh://git@github.com/rgpieper/hexapod-inertial-force-removal.git" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

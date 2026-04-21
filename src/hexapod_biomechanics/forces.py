@@ -1,5 +1,6 @@
 
-from typing import Dict, Tuple, Optional
+from dataclasses import dataclass
+from typing import Tuple, Optional
 from itertools import combinations
 import numpy as np
 import numpy.typing as npt
@@ -7,17 +8,64 @@ from scipy.spatial.distance import pdist
 from scipy.spatial.transform import Rotation
 from hexapod_biomechanics.utils import rigid_transform, clamp, normalize, inv_rodrigues
 
+
+@dataclass
+class HexGRF:
+    """Ground reaction force output from HexKistler.process_forces.
+
+    Attributes:
+        force: Force components in global frame [N] (n_frames, 3)
+        moment_origin: Moment components in global frame, represented at global origin [N*mm] (n_frames, 3)
+        COP: Center of pressure in global frame [mm] (n_frames, 3)
+        moment_free: Free moment at COP in global frame [N*mm] (n_frames, 3)
+        moment_free_scalar: Free moment magnitude [N*mm] (n_frames,)
+        is_stance: Mask for stance phase in contact with Kistler (n_frames,)
+        hex_tjct: Hexapod/Kistler angular position about the perturbation axis [rad] (n_frames,)
+    """
+    force: npt.NDArray
+    moment_origin: npt.NDArray
+    COP: npt.NDArray
+    moment_free: npt.NDArray
+    moment_free_scalar: npt.NDArray
+    is_stance: npt.NDArray
+    hex_tjct: npt.NDArray
+
+
+@dataclass
+class HexRotAxis:
+    """Perturbation rotation axis output from HexKistler.locate_rot_axis.
+
+    Attributes:
+        origin: Axis reference point nearest to neutral Kistler origin [mm] (3,).
+            None if rotation magnitude is below tolerance.
+        direction: Unit vector axis of rotation (3,). None if rotation magnitude is below tolerance.
+        max_angle: Rotation magnitude [rad].
+    """
+    origin: Optional[npt.NDArray]
+    direction: Optional[npt.NDArray]
+    max_angle: float
+
+
 class HexKistler:
     """Hexapod-Kistler ground reaction force solver.
     """
 
-    def __init__(self, cluster_hex_static: npt.NDArray) -> None:
+    def __init__(
+        self,
+        cluster_hex_static: npt.NDArray,
+        pert_axis: npt.NDArray = np.array([1.0, 0.0, 0.0]),
+    ) -> None:
         """Setup transformation from Kistler frame to global frame with Hexapod in the base/home configuration (static trial).
 
         Args:
             cluster_hex_static (npt.NDArray): Hexapod markers across a static trial [mm] (n_frames,n_markers,3)
+            pert_axis (npt.NDArray): Expected perturbation rotation axis in the
+                global frame (3,). Used to sign the hexapod angular trajectory.
+                Default [1, 0, 0] (global x-axis, dorsiflexion perturbation).
         """
 
+        self.pert_axis = np.asarray(pert_axis, dtype=float)
+        self.pert_axis = self.pert_axis / np.linalg.norm(self.pert_axis)
         self.cluster_hex_base = np.nanmean(cluster_hex_static, axis=0) # (n_markers, 3)
 
         self.a_z0 = -41 # [mm], distance from force plate surface to sensor plane / Kistler origin
@@ -43,7 +91,7 @@ class HexKistler:
             cluster_hex: npt.NDArray,
             raw_forces: npt.NDArray,
             stance_thresh: float = 18.0
-    ) -> Dict[str, npt.NDArray]:
+    ) -> HexGRF:
         """Convert raw forces to ground reaction force parameters, accounting for transformation of the Hexapod.
 
         Args:
@@ -52,14 +100,7 @@ class HexKistler:
             stance_thresh (float, optional): Vertical (z) force at which subject is in stance on Hexapod, when COP will be computed [N]. Defaults to 18.0.
 
         Returns:
-            Dict[str, npt.NDArray]: Ground reaction force parameters, including:
-                'force' (npt.NDArray): Force components in global frame [N] (n_frames,3)
-                'moment_origin' (npt.NDArray): Moment components in global frame represented at global origin [N*mm] (n_frames,3)
-                'COP' (npt.NDArray): Center of pressure coordinates in global frame [mm] (n_frames,3)
-                'moment_free' (npt.NDArray): Free moment (friction) components at COP in global frame [N*mm] (n_frames,3)
-                'moment_free_scalar' (float): Magnitude of free moment [N*mm]
-                'is_stance' (npt.NDArray): Mask for stance phase in contact with Kistler (n_frames,)
-                'hex_tjct' (npt.NDArray): Angular position trajectory of Hexapod/Kistler [radians] (n_frames,)
+            HexGRF: Ground reaction force parameters (see dataclass docstring for fields).
         """
         
         assert cluster_hex.shape[0] == raw_forces.shape[0], f"Force data length ({raw_forces.shape[0]}) does not match marker data length ({cluster_hex.shape[0]})."
@@ -123,21 +164,32 @@ class HexKistler:
         plate_normal = (R_KG @ np.array([0, 0, 1])).squeeze()
         M_free = plate_normal * M_free_scalar[:, np.newaxis] # (n_frames, 3) @ (n_frames, 1)
 
-        # compute hexapod trajectory (about x-axis)
+        # compute hexapod angular trajectory relative to neutral pose
+        # decompose into total rotation angle, signed by alignment with the
+        # expected perturbation axis. This generalises beyond pure x-axis
+        # perturbations: any axis can be specified via pert_axis at __init__.
         R_K_rel = self.T_KG[:, :3, :3] @ self.T_KG_neut[:3, :3].T
-        rot = Rotation.from_matrix(R_K_rel) # rotation trajectory of Kistler
-        rot_vec = rot.as_rotvec() # (n_frames,3)
-        theta_tjct = rot_vec[:,0]
+        rot = Rotation.from_matrix(R_K_rel)
+        rot_vec = rot.as_rotvec()  # (n_frames, 3) axis-angle representation
+        rot_mag = np.linalg.norm(rot_vec, axis=1)  # total rotation angle [rad]
+        # project onto expected perturbation axis to get signed angle
+        rot_axis = np.where(
+            rot_mag[:, np.newaxis] > 1e-10,
+            rot_vec / rot_mag[:, np.newaxis],
+            0.0,
+        )  # unit rotation axis (zero when angle is ~0)
+        alignment = np.sum(rot_axis * self.pert_axis, axis=1)
+        theta_tjct = rot_mag * np.sign(alignment)
 
-        return {
-            "force": F,
-            "moment_origin": M,
-            "COP": COP,
-            "moment_free": M_free,
-            "moment_free_scalar": M_free_scalar,
-            "is_stance": is_stance,
-            "hex_tjct": theta_tjct
-        }
+        return HexGRF(
+            force=F,
+            moment_origin=M,
+            COP=COP,
+            moment_free=M_free,
+            moment_free_scalar=M_free_scalar,
+            is_stance=is_stance,
+            hex_tjct=theta_tjct,
+        )
     
     def track_plate(self) -> Tuple[npt.NDArray, npt.NDArray]:
         """Compute Kistler corner and sensor trajectories according to Hexapod marker transformations.
@@ -168,17 +220,14 @@ class HexKistler:
 
         return corners, sensors
     
-    def locate_rot_axis(self, cluster_hex_pert: npt.NDArray) -> Optional[Dict[str, npt.NDArray]]:
+    def locate_rot_axis(self, cluster_hex_pert: npt.NDArray) -> HexRotAxis:
         """Locate perturbation axis of rotation according to terminal perturbation location of hexapod markers.
 
         Args:
             cluster_hex_pert (npt.NDArray): Terminal perturbed hexapod marker location(s) (n_frames,n_markers,3) or (n_markers,3). Multiple provided frames will be averaged.
 
         Returns:
-            Optional[Dict[str, npt.NDArray]]: Rotational axis parameters, including:
-                'origin' (npt.NDArray): Axis reference point nearest to base/neutral Kistler origin [mm] (3,)
-                'direction' (npt.NDArray): Unit vector axis of rotation (3,)
-                'angle' (float): Rotation magnitude [radians]
+            HexRotAxis: Rotational axis parameters (see dataclass docstring for fields).
         """
 
         if len(cluster_hex_pert.shape) == 3: # frame dimension included (n_frames,n_markers,3)
@@ -193,11 +242,7 @@ class HexKistler:
         theta, n = inv_rodrigues(R, tol=1e-3)
 
         if n is None:
-            return {
-                "origin": None,
-                "direction": n,
-                "max_angle": theta,
-            }
+            return HexRotAxis(origin=None, direction=n, max_angle=theta)
 
         # tranfromation: p_end = T*p_start_hom = R*p_start + x
         # if p_start on axis of rotation: p_end = p_start + (d*n) with scalar d
@@ -212,8 +257,4 @@ class HexKistler:
         slide = np.dot(p_to_K, n) # project vector onto rotational axis
         p_near_K = p_near_orig + (slide * n) # slide reference point along rotation axis to near neutral Kistler origin
 
-        return {
-            "origin": p_near_K,
-            "direction": n,
-            "max_angle": theta,
-        }
+        return HexRotAxis(origin=p_near_K, direction=n, max_angle=theta)

@@ -1,10 +1,41 @@
 
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import Callable, Optional
 import numpy as np
 import numpy.typing as npt
 from hexapod_biomechanics.utils import differentiate_rotation, normalize
 from scipy.signal import savgol_filter
 from scipy.constants import g
+
+
+@dataclass
+class AnkleDynamics:
+    """Ankle inverse dynamics output from AnkleID.compute_dynamics.
+
+    Attributes:
+        M_ank: Ankle moment in global frame [N*mm] (n_frames, 3)
+        F_ank: Ankle-shank interface force in global frame [N] (n_frames, 3)
+        M_jcs: Ankle moment projected on JCS axes [e1, e2, e3] [N*mm] (n_frames, 3)
+        F_jcs: Ankle force projected on JCS axes [e1, e2, e3] [N] (n_frames, 3)
+        omega_foot_jcs: Foot angular velocity projected on JCS axes [rad/s] (n_frames, 3)
+        alpha_foot_jcs: Foot angular acceleration projected on JCS axes [rad/s^2] (n_frames, 3)
+        M_I: Moment at AJC due to foot inertia, about e1 [N*mm] (n_frames,)
+        M_grf: Moment at AJC due to GRF, about e1 [N*mm] (n_frames,)
+        M_grav: Moment at AJC due to gravity, about e1 [N*mm] (n_frames,)
+        filter: Savitzky-Golay filter closure used internally (callable). Exposed so
+            downstream code (e.g. impedance) can filter additional signals consistently.
+    """
+    M_ank: npt.NDArray
+    F_ank: npt.NDArray
+    M_jcs: npt.NDArray
+    F_jcs: npt.NDArray
+    omega_foot_jcs: npt.NDArray
+    alpha_foot_jcs: npt.NDArray
+    M_I: npt.NDArray
+    M_grf: npt.NDArray
+    M_grav: npt.NDArray
+    filter: Callable
+
 
 class AnkleID:
     """Ankle inverse dynamics solver.
@@ -41,7 +72,7 @@ class AnkleID:
             COM_F: Optional[npt.NDArray] = None,
             filt_window_duration: float = 0.05, # seconds, ~20-30Hz cutoff,
             filt_poly: int = 4
-    ) -> Dict[str, npt.ArrayLike]:
+    ) -> AnkleDynamics:
         """Compute inverse dynamics of the foot to determine ankle forces and moments.
 
         Args:
@@ -58,20 +89,8 @@ class AnkleID:
             filt_poly (int, optional): Filter polynomial order. Defaults to 4.
 
         Returns:
-            Dict[str, npt.ArrayLike]:
-                M_ank (npt.NDArray): Ankle moment in the global frame [N*mm] (n_frames,3)
-                F_ank (npt.NDArray): Ankle-shank interface force in the global frame [N] (n_frames,3)
-                M_e1 (npt.NDArray): Moment about dorsiflexion axis [N*mm] (n_frames,)
-                M_e2 (npt.NDArray): Moment about inversion axis [N*mm] (n_frames,)
-                M_e3 (npt.NDArray): Moment about internal rotation axis [N*mm] (n_frames,)
-                F_e1 (npt.NDArray): Force along dorsiflexion axis [N] (n_frames,)
-                F_e2 (npt.NDArray): Force along inversion axis [N] (n_frames,)
-                F_e3 (npt.NDArray): Force along internal rotation axis [N] (n_frames,)
-                omega_F (npt.NDArray): Foot angular velocity in the body (calcaneus) frame [rad/s] (n_frames,3)
-                alpha_F (npt.NDArray): Foot angular acceleration in the body (calcaneus) frame [rad/s/s] (n_frames,3)
-                M_I (npt.NDArray): Moment at the AJC due to foot inertia [N*mm] (n_frames,)
-                M_grf (npt.NDArray): Moment at the AJC due to the ground reaction forces/moments [N*mm] (n_frames,)
-                M_grav (npt.NDArray): Moment at the AJC due to gravity [N*mm] (n_frames,)
+            AnkleDynamics: Ankle forces, moments, and foot kinematics projected on JCS axes
+                (see dataclass docstring for fields).
         """
         
         dt = np.mean(np.diff(t)) # sample period [sec]
@@ -106,7 +125,7 @@ class AnkleID:
             F_ank = -F_grf # [N]
         else:
             F_grav = np.zeros_like(F_grf) + np.array([0, 0, self.m_F * -g]) # [N] (n_frame,3)
-            F_ank = (self.m_F * a_com) - F_grf - F_grav # [N] ankle interface forces (n_frames,3)
+            F_ank = (self.m_F * a_com / 1000.0) - F_grf - F_grav # [N] ankle interface forces: [kg]*[mm/s/s]/1000 = [kg*m/s/s] = [N] (n_frames,3)
 
 
         # Moment Balance: about ankle joint center
@@ -135,7 +154,7 @@ class AnkleID:
         M_e2 = np.sum(M_ank * e2, axis=-1)
         M_e3 = np.sum(M_ank * e3, axis=-1)
 
-        F_e1 = np.sum(F_ank * e1, axis=-1) # [N*mm] (n_frames,)
+        F_e1 = np.sum(F_ank * e1, axis=-1) # [N] (n_frames,)
         F_e2 = np.sum(F_ank * e2, axis=-1)
         F_e3 = np.sum(F_ank * e3, axis=-1)
 
@@ -149,17 +168,15 @@ class AnkleID:
         alpha_e3 = np.sum(alpha_G * e3, axis=1) # foot angular acceleration about internal/external rotation axis
 
 
-        return {
-            "M_ank": M_ank,
-            "F_ank": F_ank,
-            "M_jcs": np.column_stack([M_e1, M_e2, M_e3]),
-            "F_jcs": np.column_stack([F_e1, F_e2, F_e3]),
-            "omega_foot_jcs": np.column_stack([omega_e1, omega_e2, omega_e3]),
-            "alpha_foot_jcs": np.column_stack([alpha_e1, alpha_e2, alpha_e3]),
-            # Eval moment components
-            "M_I": np.sum(M_I_ajc * e1, axis=-1),
-            "M_grf": np.sum(M_grf_ajc * e1, axis=-1),
-            "M_grav": np.sum(M_grav_ajc * e1, axis=-1),
-            # return filter to filter kinematics
-            "filter": filt
-        }
+        return AnkleDynamics(
+            M_ank=M_ank,
+            F_ank=F_ank,
+            M_jcs=np.column_stack([M_e1, M_e2, M_e3]),
+            F_jcs=np.column_stack([F_e1, F_e2, F_e3]),
+            omega_foot_jcs=np.column_stack([omega_e1, omega_e2, omega_e3]),
+            alpha_foot_jcs=np.column_stack([alpha_e1, alpha_e2, alpha_e3]),
+            M_I=np.sum(M_I_ajc * e1, axis=-1),
+            M_grf=np.sum(M_grf_ajc * e1, axis=-1),
+            M_grav=np.sum(M_grav_ajc * e1, axis=-1),
+            filter=filt,
+        )

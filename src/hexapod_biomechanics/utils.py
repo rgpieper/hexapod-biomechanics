@@ -362,22 +362,27 @@ def find_pert_template(
 
     return start_idx
 
-def get_body_mass(
-        fx12_static: npt.ArrayLike,
-        fx34_static: npt.ArrayLike,
-        fy14_static: npt.ArrayLike,
-        fy23_static: npt.ArrayLike,
-        fz1_static: npt.ArrayLike,
-        fz2_static: npt.ArrayLike,
-        fz3_static: npt.ArrayLike,
-        fz4_static: npt.ArrayLike
-) -> float:
+def get_body_mass(raw_forces: npt.ArrayLike) -> float:
+    """Estimate body mass from a static stand's raw Kistler channels.
 
-    fx = fx12_static + fx34_static
-    fy = fy14_static + fy23_static
-    fz = fz1_static + fz2_static + fz3_static + fz4_static
+    Sums the paired raw channels into (Fx, Fy, Fz), takes the mean resultant
+    magnitude across the stand, and divides by gravity. Frame-agnostic: as long
+    as the subject is at rest, the resultant is their weight regardless of the
+    Kistler's orientation in the global frame.
+
+    Args:
+        raw_forces: (N, 8) array of raw Kistler channels in the standard order
+            [FX12, FX34, FY14, FY23, FZ1, FZ2, FZ3, FZ4] — matches
+            `config.KISTLER_RAW_CHANNELS` and the column layout produced by
+            `C3DMan.get_analogs(session_config.kistler_raw_analog_pairs())`.
+
+    Returns:
+        Body mass [kg].
+    """
+    raw = np.asarray(raw_forces)
+    fx = raw[:, 0] + raw[:, 1]
+    fy = raw[:, 2] + raw[:, 3]
+    fz = raw[:, 4] + raw[:, 5] + raw[:, 6] + raw[:, 7]
     F_vec = np.column_stack([fx, fy, fz])
-    F_avg = np.mean(np.linalg.norm(F_vec, axis=-1))
-    body_mass = F_avg / g
-
-    return body_mass
+    F_avg = float(np.mean(np.linalg.norm(F_vec, axis=-1)))
+    return F_avg / g

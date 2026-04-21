@@ -177,9 +177,8 @@ def animate_ankle_kinematics(
         print(f"Saving to {filename}")
         writer = 'pillow' if filename.endswith('.gif') else 'ffmpeg'
         anim.save(filename, writer=writer, fps=animation_fps)
+        plt.close()
 
-    plt.close()
-    
     return anim
 
 def animate_grf(
@@ -354,8 +353,7 @@ def animate_grf(
         print(f"Saving to {filename}")
         writer = 'pillow' if filename.endswith('.gif') else 'ffmpeg'
         anim.save(filename, writer=writer, fps=animation_fps)
-    
-    plt.close()
+        plt.close()
 
     return anim
 
@@ -547,8 +545,7 @@ def animate_perturbation(
         print(f"Saving to {filename}")
         writer = 'pillow' if filename.endswith('.gif') else 'ffmpeg'
         anim.save(filename, writer=writer, fps=animation_fps)
-    
-    plt.close()
+        plt.close()
 
     return anim
 
@@ -711,7 +708,6 @@ def animate_demo(
         print(f"Saving to {filename}")
         writer = 'pillow' if filename.endswith('.gif') else 'ffmpeg'
         anim.save(filename, writer=writer, fps=animation_fps)
-    
-    plt.close()
+        plt.close()
 
     return anim

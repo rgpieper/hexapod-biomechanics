@@ -1,8 +1,48 @@
 
-from typing import Dict
+from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 from hexapod_biomechanics.utils import normalize, rigid_transform, clamp
+
+
+@dataclass
+class AnkleKinematics:
+    """6-DOF ankle joint kinematics, output of AnkleFrame.compute_kinematics.
+
+    Attributes:
+        alpha: Dorsiflexion/plantarflexion angle [rad] (n_frames,)
+        beta: Inversion/eversion angle [rad] (n_frames,)
+        gamma: Internal/external rotation angle [rad] (n_frames,)
+        q1: Medial/lateral shift [mm] (n_frames,)
+        q2: Anterior/posterior shift [mm] (n_frames,)
+        q3: Vertical shift [mm] (n_frames,)
+        e1: Dorsiflexion/plantarflexion axis (n_frames, 3)
+        e2: Inversion/eversion axis (floating) (n_frames, 3)
+        e3: Internal/external rotation axis (n_frames, 3)
+        o_ajc: Ankle joint center (intermalleolar point) in global frame [mm] (n_frames, 3)
+        R_F: Foot orientation (calcaneus rotation matrix) (n_frames, 3, 3)
+        COM_F: Foot center of mass in global frame [mm] (n_frames, 3)
+    """
+    alpha: npt.NDArray
+    beta: npt.NDArray
+    gamma: npt.NDArray
+    q1: npt.NDArray
+    q2: npt.NDArray
+    q3: npt.NDArray
+    e1: npt.NDArray
+    e2: npt.NDArray
+    e3: npt.NDArray
+    o_ajc: npt.NDArray
+    R_F: npt.NDArray
+    COM_F: npt.NDArray
+
+    @classmethod
+    def empty(cls) -> "AnkleKinematics":
+        """Placeholder instance with empty arrays (used pre-computation)."""
+        e = np.empty(0)
+        return cls(alpha=e, beta=e, gamma=e, q1=e, q2=e, q3=e,
+                   e1=e, e2=e, e3=e, o_ajc=e, R_F=e, COM_F=e)
+
 
 class AnkleFrame:
     """Ankle kinematics solver.
@@ -104,6 +144,12 @@ class AnkleFrame:
         assert sex in ["m", "f"], f"Invalid sex: {sex}. Choose \"m\" or \"f\"."
         if sex == "m":
             COM_SCS = np.array([0.382, -0.151, 0.026])*L_seg
+            # Dumas et al. 2006 Table 5: mass-normalized radii of gyration r_ij.
+            # Off-diagonal entries can be NEGATIVE (products of inertia).  The
+            # imaginary-number trick encodes the sign through squaring:
+            #   (r * L)^2 > 0  for real r   (positive diagonal / off-diagonal)
+            #   (r*j * L)^2 = -(r*L)^2 < 0  for imaginary r  (negative off-diagonal)
+            # np.real() strips the zero imaginary part after squaring.
             Inorm_SCS = np.real((np.array([
                 [0.17, 0.13, 0.08j],
                 [0.13, 0.37, 0.0],
@@ -111,7 +157,7 @@ class AnkleFrame:
             ]) * L_seg)**2) # segment-mass-normalized inertia matrix [mm^2]: r_ij = (1/L_seg)*sqrt(I_ij/m_seg)
         elif sex == "f":
             COM_SCS = np.array([0.270, -0.218, 0.039])*L_seg
-            Inorm_SCS = np.real((np.array([
+            Inorm_SCS = np.real((np.array([  # see male block for explanation of imaginary-number encoding
                 [0.17, 0.10j, 0.06],
                 [0.10j, 0.36, 0.04j],
                 [0.06, 0.04j, 0.35]
@@ -121,27 +167,14 @@ class AnkleFrame:
 
         self.T_TG = np.eye(4)[np.newaxis, ...]
         self.T_CG = np.eye(4)[np.newaxis, ...]
-        self.kinematics = {
-            "alpha": np.empty(0),
-            "beta": np.empty(0),
-            "gamma": np.empty(0),
-            "q1": np.empty(0),
-            "q2": np.empty(0),
-            "q3": np.empty(0),
-            "e1": np.empty(0),
-            "e2": np.empty(0),
-            "e3": np.empty(0),
-            "o_ajc": np.empty(0),
-            "R_F": np.empty(0),
-            "COM_F": np.empty(0)
-        }
+        self.kinematics: AnkleKinematics = AnkleKinematics.empty()
 
     def compute_kinematics(self,
             CALC: npt.NDArray,
             M1: npt.NDArray,
             M5: npt.NDArray,
             cluster_S: npt.NDArray
-    ) -> Dict[str, npt.NDArray]:
+    ) -> AnkleKinematics:
         """Compute 6-DOF ankle joint kinematics relative to neutral static configuration.
 
         Args:
@@ -151,19 +184,7 @@ class AnkleFrame:
             cluster_S (npt.NDArray): Shank cluster trajectory [mm] (n_frames,n_markers,3)
 
         Returns:
-            Dict[str, npt.NDArray]: Kinematics including:
-                'alpha' (npt.NDArray): Dorsiflexion/plantarflexion angle [rad] (n_frames,)
-                'beta' (npt.NDArray): Inversion/eversion angle [rad] (n_frames,)
-                'gamma' (npt.NDArray): Internal/external rotation angle [rad] (n_frames,)
-                'q1' (npt.NDArray): Medial/lateral shift [mm] (n_frames,)
-                'q2' (npt.NDArray): Anterior/posterior shift [mm] (n_frames,)
-                'q3' (npt.NDArray): Vertical shift [mm] (n_frames,)
-                'e1' (npt.NDArray): Dorsiflexion/plantarflexion axis (n_frames,3)
-                'e2' (npt.NDArray): Inversion/eversion axis (n_frames,3)
-                'e3' (npt.NDArray): Internal/external rotation axis (n_frames,3)
-                'o_ajc' (npt.NDArray): Ankle joint center: intermalleolar point (tibia/fibula frame origin) [mm] (n_frames,3)
-                'R_F' (npt.NDArray): Foot orientation (rotation matrix tracking calcaneus frame) (n_frames,3,3)
-                'COM_F (npt.NDArray): Foot center of mass in the global frame [mm] (n_frames,3)
+            AnkleKinematics: 6-DOF joint kinematics (see dataclass docstring for fields).
         """
 
         T_S_move = rigid_transform(self.cluster_S_neut, cluster_S) # shank movement from base to dynamic
@@ -209,19 +230,19 @@ class AnkleFrame:
         q2 = np.sum(v_TC * e2, axis=1) # anterior/posterior shift
         q3 = np.sum(v_TC * e3, axis=1)
 
-        self.kinematics = {
-            "alpha": alpha,
-            "beta": beta,
-            "gamma": gamma,
-            "q1": q1,
-            "q2": q2,
-            "q3": q3,
-            "e1": e1,
-            "e2": e2,
-            "e3": e3,
-            "o_ajc": o_T_G,
-            "R_F": self.T_CG[:, :3, :3],
-            "COM_F": COM_G
-        }
+        self.kinematics = AnkleKinematics(
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+            q1=q1,
+            q2=q2,
+            q3=q3,
+            e1=e1,
+            e2=e2,
+            e3=e3,
+            o_ajc=o_T_G,
+            R_F=self.T_CG[:, :3, :3],
+            COM_F=COM_G,
+        )
 
         return self.kinematics
