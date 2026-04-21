@@ -9,18 +9,17 @@ wheels/
 # Virtual environments
 .venv
 
-# Specific data and model weights
+# Subject data and raw captures (too large and/or sensitive for git)
+subjects/
 data/
-models/
 
-# Scratchpad notebook for demo
-notebooks/scratchpad.ipynb
+# Model weights — hosted as GitHub Release assets, fetched via scripts/download_weights.py
+models/*.pth
+
+# Notebooks (kept locally for reference; pipeline scripts are the canonical entry points)
+notebooks/
 
 # Sandbox / throwaway scripts
 .sandbox/
 
 .DS_Store
-
-# Session artifacts (not project history)
-CLAUDE.local.md
-refactor-plan.md
