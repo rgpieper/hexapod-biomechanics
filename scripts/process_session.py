@@ -2,7 +2,7 @@
 
 Run from the project root:
 
-    uv run python scripts/process_session.py subjects/RP081721/11082025
+    uv run python scripts/process_session.py subjects/RP041026/15102026
 
 Discovers all `(side, trial_type, pct)` combinations from the session's
 dynamic trial filenames and writes one HDF5 per condition into
@@ -96,6 +96,18 @@ def process_session(session_dir: Path, weights_path: Path) -> None:
     # Static blocks are shared across conditions — cache them across the sweep.
     static_block_loader = make_static_block_loader(config, session_dir)
 
+    # Optional Delsys integration: auto-detect raw_data/delsys/ if it exists.
+    # When present, per-trial NPZs (output of `scripts/segment_delsys.py`) are
+    # loaded, interpolated onto the Vicon analog grid, sliced to stance, and
+    # written under each trial's `delsys/` subgroup in the condition h5.
+    delsys_dir: Optional[Path] = session_dir / "raw_data" / "delsys"
+    if not delsys_dir.exists():
+        delsys_dir = None
+        print("Delsys integration: skipped (no raw_data/delsys/ found).")
+    else:
+        n_npz = sum(1 for _ in delsys_dir.glob("*.npz"))
+        print(f"Delsys integration: {n_npz} per-trial NPZs in {delsys_dir}")
+
     conditions = _discover_conditions(config)
     if not conditions:
         print(f"No parseable dynamic trials found in {config_path}.")
@@ -131,6 +143,7 @@ def process_session(session_dir: Path, weights_path: Path) -> None:
             sex=config.sex,
             force_model=force_model,
             perturbation_pct=pct,
+            delsys_dir=delsys_dir,
         )
 
     print("\nDone.")

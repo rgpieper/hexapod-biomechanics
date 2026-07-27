@@ -4,12 +4,9 @@ Loads a trial's markers + raw Kistler forces + accelerometer signals from its
 c3d, subtracts MLP-predicted inertial forces from the raw Kistler channels,
 then runs kinematics + dynamics. Per-condition HDF5 files contain all trials
 for that condition.
-
-Force correction is done INSIDE this stage because the accelerometer data
-lives in the same c3d as the markers and forces. Other hardware setups should
-fork `force_correction.py` and adapt this call site.
 """
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,8 +16,14 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 from scipy.constants import g
+from scipy.interpolate import interp1d
 
-from hexapod_biomechanics.config import SessionConfig
+from hexapod_biomechanics.config import (
+    SessionConfig,
+    accel_analog_pairs,
+    kistler_raw_analog_pairs,
+)
+from hexapod_biomechanics.delsys import DelsysChannel, DelsysSignals, load_trial_npz
 from hexapod_biomechanics.force_correction import BasicMLP
 from hexapod_biomechanics.forces import HexGRF, HexKistler, HexRotAxis
 from hexapod_biomechanics.inverse_dynamics import AnkleDynamics, AnkleID
@@ -64,7 +67,6 @@ class TrialResult:
     `stance_start_sample_capture` anchors the stance-period signals to the full
     Vicon capture timebase, supporting downstream Delsys sync.
     """
-    # identifiers
     trial_name: str
     trial_type: str                # "nominal" | "perturbed"
     session_id: str
@@ -73,29 +75,36 @@ class TrialResult:
     fs_hz: float
     body_mass_kg: float
     stance_start_sample_capture: int   # full-capture index where stance begins
-    # stance-period signals (N = number of stance samples)
-    # Angles come in two variants because Stage 2 has two paths (see
-    # forking-design-choices.md fork #5):
-    #   - raw `alpha/beta/gamma` (arccos output, UNFILTERED) — fed to the
-    #     secondary path (subtract raw, then sav-gol filter + differentiate
-    #     in one pass).
-    #   - `alpha_filt/beta_filt/gamma_filt` — one-pass sav-gol deriv=0
-    #     filtered (same filter as dynamics). Fed to the primary path so the
-    #     isolated angle is consistent with the one-pass-filtered ω and τ.
+    # Angles come in two variants to support differentiation before and after subtraction:
+    #   - raw `alpha/beta/gamma` (arccos output, UNFILTERED) — subtract raw angles,
+    #     then sav-gol filter + differentiate.
+    #   - `alpha_filt/beta_filt/gamma_filt` — filtered before subtraction for consistency with
+    #     ankle omega, foot alpha, torque (all subtracted independently).
     time: npt.NDArray              # (N,) seconds from stance start
     alpha: npt.NDArray             # (N,) DF/PF raw [rad]
     beta: npt.NDArray              # (N,) Inv/Ev raw [rad]
     gamma: npt.NDArray             # (N,) IntR/ExtR raw [rad]
-    alpha_filt: npt.NDArray        # (N,) DF/PF one-pass filtered [rad]
-    beta_filt: npt.NDArray         # (N,) Inv/Ev one-pass filtered [rad]
-    gamma_filt: npt.NDArray        # (N,) IntR/ExtR one-pass filtered [rad]
+    alpha_filt: npt.NDArray        # (N,) DF/PF filtered [rad]
+    beta_filt: npt.NDArray         # (N,) Inv/Ev filtered [rad]
+    gamma_filt: npt.NDArray        # (N,) IntR/ExtR filtered [rad]
     omega_jcs: npt.NDArray         # (N, 3) ankle angular velocity about e1,e2,e3
     tau_full: npt.NDArray          # (N, 3) torque (full dynamics) on JCS axes [N*mm]
     tau_static: npt.NDArray        # (N, 3) torque (static dynamics) on JCS axes [N*mm]
     foot_omega_jcs: npt.NDArray    # (N, 3) foot ω projected on JCS axes [rad/s]
     foot_alpha_jcs: npt.NDArray    # (N, 3) foot α projected on JCS axes [rad/s^2]
+    # Hexapod platform angular trajectory about the perturbation axis,
+    # stance-sliced. Stored for all trials (nominal trials sit near zero).
+    # Enables full-stance visualization of the perturbation input alongside
+    # the biomechanical response.
+    hex_tjct: npt.NDArray          # (N,) hexapod angle about pert axis [rad]
     # perturbation metadata (None for nominal trials)
     perturbation: Optional[PerturbationInfo] = None
+    # Delsys EMG/goniometer signals — present when a per-trial NPZ from
+    # `scripts/segment_delsys.py` is found at processing time. All channels
+    # are interpolated onto Vicon's analog grid (`fs_hz`) and sliced to the
+    # same stance period as the rest of the per-trial signals; their `.t`
+    # arrays match `time` above. None for sessions / trials without Delsys.
+    delsys: Optional[DelsysSignals] = None
 
 
 @dataclass
@@ -129,10 +138,10 @@ class TrialSpec:
 class TrialIntermediates:
     """Full-capture intermediate arrays from one trial's processing.
 
-    `TrialResult` is the stance-sliced, persisted subset consumed by Stage 2;
-    `TrialIntermediates` is the complete bundle — retained so validation and
-    visualization code (e.g. `visualize.animate_*`) can inspect any stage of
-    the computation without re-running the pipeline.
+    `TrialResult` is the stance-sliced, persisted subset; `TrialIntermediates`
+    is the complete bundle — retained so validation and visualization code
+    (e.g. `visualize.animate_*`) can inspect any step of the computation
+    without re-running the pipeline.
 
     All array fields span the full Vicon capture length. `stance_slice`
     indexes them to produce the stance-only `TrialResult` subset.
@@ -143,12 +152,12 @@ class TrialIntermediates:
     fs: float
     stance_slice: slice                   # slice into full-capture arrays
 
-    # markers (full-capture)
-    CALC: npt.NDArray                     # (F, 3)
-    M1: npt.NDArray                       # (F, 3)
-    M5: npt.NDArray                       # (F, 3)
-    cluster_S: npt.NDArray                # (F, n_shank, 3)
-    hex_markers: npt.NDArray              # (F, 3, 3)
+    # marker trajectories (full-capture)
+    CALC: npt.NDArray                     # calcaneus (F, 3)
+    M1: npt.NDArray                       # first metatarsal (F, 3)
+    M5: npt.NDArray                       # fifth metatarsal (F, 3)
+    cluster_S: npt.NDArray                # shank cluster (F, n_shank, 3)
+    hex_markers: npt.NDArray              # hexapod (F, 3, 3)
 
     # force processing
     raw_forces: npt.NDArray               # (F, 8) raw Kistler channels
@@ -174,7 +183,7 @@ class TrialIntermediates:
     dyn_full: AnkleDynamics               # with inertial terms
     dyn_static: AnkleDynamics             # without inertial terms
 
-    # perturbation axis (perturbed trials only)
+    # perturbation axis of the hexapod (perturbed trials only)
     perturbation_axis: Optional[HexRotAxis] = None
 
 
@@ -191,7 +200,7 @@ def configure_from_static(
     """Build per-side AnkleFrame + AnkleID and a shared HexKistler from one static.
 
     Body mass is computed from the mean resultant GRF magnitude over the
-    static stand and stored on the block.
+    static trial and stored on the block.
 
     Args:
         static_data: Loaded c3d for the static trial.
@@ -207,22 +216,29 @@ def configure_from_static(
         ValueError: If a requested side is missing any of its 10 ankle joint
             markers (with complete frames) in the static c3d.
     """
-    # Shared: hexapod markers + raw Kistler channels
     hex_points = static_data.get_points(session_config.hexapod_marker_labels())
-    if hex_points.missing_frames:
+    hex_markers = hex_points.values
+    raw_forces = static_data.get_analogs(kistler_raw_analog_pairs(static_data)).values
+    nan_per_frame = np.isnan(hex_markers).any(axis=(1, 2))
+    n_trim_end = 0
+    while n_trim_end < len(nan_per_frame) and nan_per_frame[-(n_trim_end + 1)]:
+        n_trim_end += 1
+    if n_trim_end:
+        hex_markers = hex_markers[:-n_trim_end]
+        raw_forces = raw_forces[:-n_trim_end]
+    if np.isnan(hex_markers).any():
         raise ValueError(
-            f"Static missing frames for hexapod markers: {hex_points.missing_frames}. "
+            f"Static has unfillable mid-capture/leading-edge gaps in hexapod "
+            f"markers (raw c3d missing: {hex_points.missing_frames}). "
             f"Hexapod tracking must be complete to establish the Kistler frame."
         )
-    hex_markers = hex_points.values
-    raw_forces = static_data.get_analogs(session_config.kistler_raw_analog_pairs()).values
 
     kistler = HexKistler(
         cluster_hex_static=hex_markers,
         pert_axis=np.asarray(session_config.pert_axis, dtype=float),
     )
 
-    # Body mass: mean resultant force magnitude during the static stand / g
+    # Body mass: mean resultant force magnitude during the static capture / g
     grf_static = kistler.process_forces(cluster_hex=hex_markers, raw_forces=raw_forces)
     body_mass_kg = float(np.mean(np.linalg.norm(grf_static.force, axis=-1)) / g)
 
@@ -282,13 +298,23 @@ def _load_ankle_markers_static(
 
     points = static_data.get_points(flat_labels)
 
-    if points.missing_frames:
-        raise ValueError(
-            f"Static missing frames for {side}-ankle markers: "
-            f"{points.missing_frames}."
-        )
-
     markers = points.values
+    nan_per_frame = np.isnan(markers).any(axis=(1, 2))
+    n_trim_end = 0
+    while n_trim_end < len(nan_per_frame) and nan_per_frame[-(n_trim_end + 1)]:
+        n_trim_end += 1
+    if n_trim_end:
+        markers = markers[:-n_trim_end]
+    if np.isnan(markers).any():
+        nan_counts = {
+            lab: int(np.isnan(markers[:, i, :]).any(axis=1).sum())
+            for i, lab in enumerate(flat_labels)
+        }
+        nan_counts = {k: v for k, v in nan_counts.items() if v}
+        raise ValueError(
+            f"Static has unfillable mid-capture/leading-edge gaps in "
+            f"{side}-ankle markers: {nan_counts}."
+        )
     out: dict[str, npt.NDArray] = {
         role: markers[:, i, :] for i, role in enumerate(single_roles)
     }
@@ -305,7 +331,7 @@ def _parse_trial_filename(stem: str) -> Optional[tuple[str, str, Optional[int]]]
 
     Args:
         stem: Trial filename without extension
-            (e.g. "hex_20250811_trip12_pert_50pct_rev").
+            (e.g. "*_trip12_pert_50pct_rev").
 
     Returns:
         A tuple `(trial_type, direction, pct)` where `trial_type` is
@@ -514,12 +540,11 @@ def compute_trial_intermediates(
     # The model was trained on voltage-domain accel data — if Vicon exported
     # as m/s², reverse that conversion first.
     raw_forces = spec.trial_data.get_analogs(
-        session_config.kistler_raw_analog_pairs()
+        kistler_raw_analog_pairs(spec.trial_data)
     ).values
-    accel = spec.trial_data.get_analogs(
-        session_config.accel_analog_pairs()
-    ).values
-    if session_config.accel_mode == "accelerometer":
+    accel_mode, accel_pairs = accel_analog_pairs(spec.trial_data)
+    accel = spec.trial_data.get_analogs(accel_pairs).values
+    if accel_mode == "accelerometer":
         accel = convert_accel(accel)
     induced_force = force_model.predict_segments(
         [accel.astype(np.float32)],
@@ -566,14 +591,11 @@ def compute_trial_intermediates(
     stance_slice = slice(i_stance_start, i_stance_end + 1)
 
     # Angle handling: kin.alpha/beta/gamma are raw arccos outputs (unfiltered).
-    # Apply the same Savitzky-Golay filter used by dynamics (deriv=0 branch)
-    # so every stored kinematic signal is one-pass filtered — angles via this
-    # filter, ω via deriv=1 of the same filter, τ via the dynamics' internal
-    # filter. `omega_jcs` is derived directly from the raw angles (the
-    # filtering is implicit in deriv=1); `*_filt` is the deriv=0 smoothed
-    # angle, used by Stage 2's primary path. Raw `alpha/beta/gamma` remain
-    # available on TrialResult for Stage 2's secondary path, which filters
-    # once via post-subtraction sav-gol + differentiation.
+    # Apply the same Savitzky-Golay filter used by dynamics so every stored
+    # kinematic signal is one-pass filtered — angles via deriv=0, ω via
+    # deriv=1 of the same filter, τ via the dynamics' internal filtering.
+    # Raw `alpha/beta/gamma` are also retained on TrialResult so downstream
+    # code can subtract first and filter once afterwards if it prefers.
     filt = dyn_full.filter
     abg = np.column_stack([kin.alpha, kin.beta, kin.gamma])
     abg_filt = filt(abg, deriv=0)                 # (F, 3) [rad] one-pass filtered
@@ -641,6 +663,7 @@ def process_trial(
     pert_pre_window_ms: float = 25.0,
     pert_post_window_ms: float = 100.0,
     terminal_window_ms: tuple[float, float] = (150.0, 500.0),
+    delsys_path: Optional[Path] = None,
 ) -> TrialResult:
     """Compute intermediates for one trial and derive its stance-sliced result.
 
@@ -659,9 +682,15 @@ def process_trial(
         pert_post_window_ms: Post-onset window duration.
         terminal_window_ms: (start, end) ms window used to locate the terminal
             perturbed hexapod pose for axis-of-rotation estimation.
+        delsys_path: Optional path to this trial's Delsys NPZ (typically
+            `<session_dir>/raw_data/delsys/<trial_name>.npz`). When supplied
+            and the file exists, every channel is cubic-interpolated onto
+            Vicon's analog grid, sliced to the stance period, and attached
+            to `TrialResult.delsys`. When None or missing, `delsys` is None.
 
     Returns:
-        TrialResult: Stance-period signals + optional perturbation metadata.
+        TrialResult: Stance-period signals + optional perturbation metadata
+            + optional Delsys signals.
     """
     intermediates = compute_trial_intermediates(
         spec,
@@ -670,12 +699,80 @@ def process_trial(
         pert_threshold_deg=pert_threshold_deg,
         terminal_window_ms=terminal_window_ms,
     )
+    delsys: Optional[DelsysSignals] = None
+    if delsys_path is not None and Path(delsys_path).exists():
+        delsys = _load_and_align_delsys(
+            Path(delsys_path),
+            t_full=intermediates.t_full,
+            fs=intermediates.fs,
+            stance_slice=intermediates.stance_slice,
+        )
     return _derive_trial_result(
         intermediates,
         pert_threshold_deg=pert_threshold_deg,
         pert_pre_threshold_ms=pert_pre_threshold_ms,
         pert_pre_window_ms=pert_pre_window_ms,
         pert_post_window_ms=pert_post_window_ms,
+        delsys=delsys,
+    )
+
+
+def _load_and_align_delsys(
+    delsys_path: Path,
+    t_full: npt.NDArray,
+    fs: float,
+    stance_slice: slice,
+) -> DelsysSignals:
+    """Load a trial NPZ and align channels onto the stance-period Vicon grid.
+
+    The NPZ time arrays are in seconds-from-trigger-pulse; subtract
+    `segment_start_s` to get trial-local time, cubic-interpolate each
+    channel onto `t_full`, then slice to the stance window.
+
+    Returns a `DelsysSignals` whose channel `.t` arrays match
+    `t_full[stance_slice] - t_full[stance_slice.start]` (stance-relative
+    seconds, the same convention as `TrialResult.time`).
+    """
+    delsys_block = load_trial_npz(delsys_path)
+    if delsys_block.segment_start_s is None:
+        raise ValueError(
+            f"{delsys_path} has no segment_start_s — cannot align with Vicon "
+            "timebase. Was this NPZ produced by `segment_delsys.py`?"
+        )
+    offset_s = float(delsys_block.segment_start_s)
+
+    t_stance = t_full[stance_slice] - t_full[stance_slice.start]
+
+    aligned: dict[str, DelsysChannel] = {}
+    for name, ch in delsys_block.channels.items():
+        # NPZ time is trigger-pulse-absolute; convert to trial-local.
+        t_local = ch.t - offset_s
+        interp = interp1d(
+            t_local,
+            ch.v,
+            kind="cubic",
+            bounds_error=False,
+            fill_value=np.nan,
+            assume_sorted=True,
+        )
+        v_full = interp(t_full)
+        aligned[name] = DelsysChannel(
+            label=name,
+            t=t_stance,
+            v=np.asarray(v_full[stance_slice]),
+            fs_hz=fs,
+            units=ch.units,
+            sensor_id=ch.sensor_id,
+        )
+
+    return DelsysSignals(
+        channels=aligned,
+        trial_stem=delsys_block.trial_stem,
+        block_id=delsys_block.block_id,
+        segment_start_s=delsys_block.segment_start_s,
+        segment_end_s=delsys_block.segment_end_s,
+        static_stem=delsys_block.static_stem,
+        gonio_offsets_rad=delsys_block.gonio_offsets_rad,
     )
 
 
@@ -685,6 +782,7 @@ def _derive_trial_result(
     pert_pre_threshold_ms: float,
     pert_pre_window_ms: float,
     pert_post_window_ms: float,
+    delsys: Optional[DelsysSignals] = None,
 ) -> TrialResult:
     """Slice intermediates to stance and build the persisted `TrialResult`.
 
@@ -738,7 +836,9 @@ def _derive_trial_result(
         tau_static=inter.dyn_static.M_jcs[sl],
         foot_omega_jcs=inter.dyn_full.omega_foot_jcs[sl],
         foot_alpha_jcs=inter.dyn_full.alpha_foot_jcs[sl],
+        hex_tjct=inter.grf.hex_tjct[sl],
         perturbation=pert_info,
+        delsys=delsys,
     )
 
 
@@ -783,7 +883,7 @@ def _compute_perturbation_info(
     pre_win_frames = round(pert_pre_window_ms / 1000.0 * fs)
     post_win_frames = round(pert_post_window_ms / 1000.0 * fs)
 
-    onset = i_thresh - pre_thresh_frames             # stance-relative onset
+    onset = i_thresh - pre_thresh_frames             # stance-relative perturbation onset
     window_start = onset - pre_win_frames
     window_end = onset + post_win_frames
 
@@ -815,10 +915,6 @@ def perturbation_window_slice(
 ) -> slice:
     """Derive the full-capture slice covering the perturbation window.
 
-    Uses the same onset/window constants as `process_trial` so downstream
-    visualizations line up with the persisted `PerturbationInfo`. Defaults
-    match `process_trial`; override if the call site uses different ones.
-
     Args:
         inter: Trial intermediates (must have `perturbation_axis`).
         pert_threshold_deg: Hexapod angle threshold for onset detection.
@@ -842,7 +938,7 @@ def perturbation_window_slice(
     sl = inter.stance_slice
     i_stance_start = sl.start
 
-    # Stance-relative onset, same math as _compute_perturbation_info.
+    # Stance-relative onset
     threshold_rad = np.radians(pert_threshold_deg)
     i_thresh = find_pert_thresh(
         hex_tjct=inter.grf.hex_tjct[sl], thresh=threshold_rad,
@@ -868,16 +964,17 @@ def process_condition(
     force_correction_step_size: int = 50,
     perturbation_pct: Optional[int] = None,
     extra_attrs: Optional[dict] = None,
+    delsys_dir: Optional[Path] = None,
 ) -> None:
     """Process all `trials` and write a single HDF5 file for the condition.
 
     Caller is responsible for grouping trials into a condition and associating
-    each with its static block. One file = one Stage-2 input.
+    each with its static block. One file = one condition.
 
     Args:
         trials: Trial specs sharing the same condition.
         output_h5: Output HDF5 path.
-        condition_id: File-level identifier, e.g. "C0111085_11082025_right_pert_50".
+        condition_id: File-level identifier, e.g. "RP041026_15102026_right_pert_50".
         side: "right" | "left" — the condition's ankle side.
         subject_id: Subject identifier.
         sex: "m" | "f", for downstream anthropometric reference.
@@ -888,7 +985,14 @@ def process_condition(
             for perturbed conditions. Pass None for nominal conditions — the
             `perturbation_pct` file attr is omitted entirely in that case.
         extra_attrs: Optional additional file-level attrs (e.g. prosthesis
-            stiffness for amputee conditions). Defaults to None (nothing extra).
+            stiffness for amputee validation). Defaults to None (nothing extra).
+        delsys_dir: Optional directory containing per-trial Delsys NPZ files
+            (typically `<session_dir>/raw_data/delsys/`). For each trial,
+            looks up `<delsys_dir>/<trial_name>.npz`; if found, the channels
+            are aligned onto Vicon's analog grid + stance period and saved
+            under the trial's `delsys/` h5 subgroup. Trials without a
+            matching NPZ are processed normally with no Delsys data. None
+            disables Delsys handling entirely.
     """
     output_h5 = Path(output_h5)
     output_h5.parent.mkdir(parents=True, exist_ok=True)
@@ -905,10 +1009,16 @@ def process_condition(
                 f.attrs[key] = value
 
         for spec in trials:
+            delsys_path: Optional[Path] = None
+            if delsys_dir is not None:
+                candidate = Path(delsys_dir) / f"{spec.trial_name}.npz"
+                if candidate.exists():
+                    delsys_path = candidate
             result = process_trial(
                 spec,
                 force_model=force_model,
                 force_correction_step_size=force_correction_step_size,
+                delsys_path=delsys_path,
             )
             _write_trial_group(f, result)
 
@@ -956,6 +1066,7 @@ def _write_trial_group(f: h5py.File, result: TrialResult) -> None:
     grp.create_dataset("tau_static", data=result.tau_static)
     grp.create_dataset("foot_omega_jcs", data=result.foot_omega_jcs)
     grp.create_dataset("foot_alpha_jcs", data=result.foot_alpha_jcs)
+    grp.create_dataset("hex_tjct", data=result.hex_tjct)
 
     if result.perturbation is not None:
         pg = grp.create_group("perturbation")
@@ -973,6 +1084,43 @@ def _write_trial_group(f: h5py.File, result: TrialResult) -> None:
             data=result.perturbation.axis_positional_offset,
         )
 
+    if result.delsys is not None:
+        _write_delsys_subgroup(grp, result.delsys)
+
+
+def _write_delsys_subgroup(grp: h5py.Group, delsys: DelsysSignals) -> None:
+    """Write `delsys/` subgroup under a trial group.
+
+    Channel datasets are stored flat under `delsys/` keyed by channel name
+    (e.g. `delsys/gonio_left_df_pf`, `delsys/LTA`). Per-channel `units` and
+    `sensor_id` are dataset attrs so the round-trip preserves the
+    `DelsysChannel` dataclass exactly. The shared time vector is the
+    trial's existing `time` dataset (Delsys channels are aligned onto it),
+    so no separate Delsys time array is stored.
+    """
+    dg = grp.create_group("delsys")
+    if delsys.block_id is not None:
+        dg.attrs["block_id"] = delsys.block_id
+    if delsys.segment_start_s is not None:
+        dg.attrs["segment_start_s"] = float(delsys.segment_start_s)
+    if delsys.segment_end_s is not None:
+        dg.attrs["segment_end_s"] = float(delsys.segment_end_s)
+    if delsys.static_stem is not None:
+        dg.attrs["static_stem"] = delsys.static_stem
+    if delsys.gonio_offsets_rad:
+        # JSON-encode dict for h5 attr compatibility.
+        dg.attrs["gonio_offsets_rad"] = json.dumps(delsys.gonio_offsets_rad)
+    if delsys.channels:
+        # All channels share a single fs_hz (interpolated to Vicon's rate).
+        first_ch = next(iter(delsys.channels.values()))
+        dg.attrs["fs_hz"] = float(first_ch.fs_hz)
+
+    for name, ch in delsys.channels.items():
+        ds = dg.create_dataset(name, data=ch.v)
+        ds.attrs["units"] = ch.units
+        if ch.sensor_id is not None:
+            ds.attrs["sensor_id"] = ch.sensor_id
+
 
 def _read_trial_group(grp: h5py.Group) -> TrialResult:
     """Reconstruct a TrialResult from its h5 group."""
@@ -989,6 +1137,16 @@ def _read_trial_group(grp: h5py.Group) -> TrialResult:
             axis_positional_offset=pg["axis_positional_offset"][...],
         )
 
+    time_array = grp["time"][...]
+    delsys = _read_delsys_subgroup(grp, time_array) if "delsys" in grp else None
+
+    if "hex_tjct" not in grp:
+        raise KeyError(
+            f"Trial {grp.name!r} is missing the `hex_tjct` dataset — this "
+            f"condition HDF5 was written by an older version of "
+            f"process_session.py. Re-run process_session.py to regenerate."
+        )
+
     return TrialResult(
         trial_name=grp.name.rsplit("/", 1)[-1],
         trial_type=_decode_attr(grp.attrs["trial_type"]),
@@ -998,7 +1156,7 @@ def _read_trial_group(grp: h5py.Group) -> TrialResult:
         fs_hz=float(grp.attrs["fs_hz"]),
         body_mass_kg=float(grp.attrs["body_mass_kg"]),
         stance_start_sample_capture=int(grp.attrs["stance_start_sample_capture"]),
-        time=grp["time"][...],
+        time=time_array,
         alpha=grp["alpha"][...],
         beta=grp["beta"][...],
         gamma=grp["gamma"][...],
@@ -1010,7 +1168,45 @@ def _read_trial_group(grp: h5py.Group) -> TrialResult:
         tau_static=grp["tau_static"][...],
         foot_omega_jcs=grp["foot_omega_jcs"][...],
         foot_alpha_jcs=grp["foot_alpha_jcs"][...],
+        hex_tjct=grp["hex_tjct"][...],
         perturbation=perturbation,
+        delsys=delsys,
+    )
+
+
+def _read_delsys_subgroup(
+    grp: h5py.Group, time_array: npt.NDArray
+) -> DelsysSignals:
+    """Reconstruct a `DelsysSignals` from a trial's `delsys/` subgroup."""
+    dg = grp["delsys"]
+    fs_hz = float(dg.attrs["fs_hz"]) if "fs_hz" in dg.attrs else float(grp.attrs["fs_hz"])
+
+    channels: dict[str, DelsysChannel] = {}
+    for ch_name in dg.keys():
+        ch_ds = dg[ch_name]
+        sensor_id = _decode_attr(ch_ds.attrs["sensor_id"]) if "sensor_id" in ch_ds.attrs else None
+        units = _decode_attr(ch_ds.attrs["units"]) if "units" in ch_ds.attrs else ""
+        channels[ch_name] = DelsysChannel(
+            label=ch_name,
+            t=time_array,
+            v=ch_ds[...],
+            fs_hz=fs_hz,
+            units=units,
+            sensor_id=sensor_id,
+        )
+
+    gonio_offsets_rad: Optional[dict[str, float]] = None
+    if "gonio_offsets_rad" in dg.attrs:
+        gonio_offsets_rad = json.loads(_decode_attr(dg.attrs["gonio_offsets_rad"]))
+
+    return DelsysSignals(
+        channels=channels,
+        trial_stem=grp.name.rsplit("/", 1)[-1],
+        block_id=_decode_attr(dg.attrs["block_id"]) if "block_id" in dg.attrs else None,
+        segment_start_s=float(dg.attrs["segment_start_s"]) if "segment_start_s" in dg.attrs else None,
+        segment_end_s=float(dg.attrs["segment_end_s"]) if "segment_end_s" in dg.attrs else None,
+        static_stem=_decode_attr(dg.attrs["static_stem"]) if "static_stem" in dg.attrs else None,
+        gonio_offsets_rad=gonio_offsets_rad,
     )
 
 
