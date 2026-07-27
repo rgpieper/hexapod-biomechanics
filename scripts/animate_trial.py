@@ -3,8 +3,8 @@
 Run from the project root:
 
     uv run python scripts/animate_trial.py \\
-        subjects/RP081721/11082025 \\
-        hex_20250811_trip12_pert_50pct_fwd \\
+        subjects/RP041026/15102026 \\
+        hex_20261015_trip12_pert_50pct_fwd \\
         --which perturbation
 
 Use this for ad-hoc physical-plausibility checks after a pipeline change.

@@ -1,13 +1,11 @@
 """MLP-based inertial force correction for the Kistler plate mounted on the
-Hexapod. Migrated from the `hexapod-inertial-force-removal` project so this
-repo is self-contained.
+Hexapod.
 
 The model predicts the inertial forces induced on the Kistler by Hexapod
 motion, given the 12-channel accelerometer signal. Subtracting the prediction
 from the measured 8-channel raw force yields the "true" GRF.
 
-Only the inference path is included — training code and alternate dataset
-classes live in the upstream repo.
+Only the inference path is included; training code is maintained separately.
 """
 
 from __future__ import annotations

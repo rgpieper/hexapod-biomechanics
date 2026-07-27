@@ -1,12 +1,8 @@
-"""C3D file loading with cached in-memory frames.
-
-`C3DMan` reads a c3d file once at construction time and caches the full point
-and analog arrays. Subsequent `get_points` / `get_analogs` calls index into the
-cache — no repeated file I/O.
+"""C3D file loading to extract and format marker trajectories and analog signals.
 
 Memory note: one `C3DMan` instance holds its entire trial in memory. When
-processing many trials (e.g. a full condition), load one at a time rather than
-building a list of preloaded instances.
+processing many trials, load one at a time rather than building a list of 
+preloaded instances.
 """
 
 from dataclasses import dataclass, field
@@ -43,7 +39,7 @@ class PointData:
             < 0). Label → int. Empty dict when all markers are clean. Markers
             with any missing frames have NaN entries interpolated (or filled
             with NaN at trial ends); downstream code should inspect this field
-            when missing data would corrupt the pipeline (e.g. shank cluster).
+            when missing data would corrupt the pipeline.
     """
     values: npt.NDArray
     t: npt.NDArray
@@ -63,7 +59,7 @@ class AnalogData:
 
 
 class C3DMan:
-    """C3D file reader with cached in-memory data.
+    """C3D file reader.
 
     Attributes:
         c3d_path (str): Path to the c3d file.
@@ -86,44 +82,51 @@ class C3DMan:
         with open(self.c3d_path, 'rb') as f:
             reader = c3d.Reader(f)
 
-            # Metadata: label → index maps and sample rates
-            desc_analog = [d.strip() for d in reader.get("ANALOG").get("DESCRIPTIONS").string_array]
-            lab_analog = [lab.strip() for lab in reader.analog_labels]
+            desc_analog = [d.strip() for d in reader.get("ANALOG").get("DESCRIPTIONS").string_array] # analog descriptions
+            lab_analog = [lab.strip() for lab in reader.analog_labels] # analog labels
             self.analog_map = pd.DataFrame({'Description': desc_analog, 'Label': lab_analog})
             self.analog_map = (
                 self.analog_map.reset_index()
                 .set_index(['Description', 'Label'])
-                .sort_index()  # avoid lexsort-depth PerformanceWarning on .loc/.at lookups
+                .sort_index()
             )
 
-            lab_point = [lab.strip() for lab in reader.point_labels]
+            lab_point = [lab.strip() for lab in reader.point_labels] # point (marker) labels
             self.point_map = pd.DataFrame({'Label': lab_point})
             self.point_map = self.point_map.reset_index().set_index(['Label'])
 
             self.fs_analog = reader.analog_rate
             self.fs_point = reader.point_rate
 
-            # Read all frames once. Points are stored at native point rate;
-            # upsampling to analog rate is deferred to get_points.
             n_frames = reader.frame_count
             n_points = len(lab_point)
             n_analogs = len(lab_analog)
             analog_per_frame = reader.analog_per_frame
 
             self._points_raw = np.full((n_frames, n_points, 3), np.nan)
-            # Per-marker, per-frame valid mask (True where data is present).
             self._points_valid = np.zeros((n_frames, n_points), dtype=bool)
             self._analogs = np.zeros((n_frames * analog_per_frame, n_analogs))
 
+            last_row = -1
             for frame, points, analogs in reader.read_frames():
                 row_idx = frame - reader.first_frame
-                valid = points[:, 3] >= 0        # residual < 0 ⇒ missing
+                valid = points[:, 3] >= 0 # residual < 0 ⇒ missing
                 self._points_raw[row_idx, valid, :] = points[valid, :3]
                 self._points_valid[row_idx, :] = valid
 
                 a_start = row_idx * analog_per_frame
                 a_end = a_start + analog_per_frame
                 self._analogs[a_start:a_end, :] = analogs.T
+                last_row = row_idx
+
+            # Some files report higher frame count than existing point data
+            # Trim trailing rows the reader never filled
+            actual_frames = last_row + 1
+            if actual_frames < n_frames:
+                self._points_raw = self._points_raw[:actual_frames]
+                self._points_valid = self._points_valid[:actual_frames]
+                self._analogs = self._analogs[:actual_frames * analog_per_frame]
+                n_frames = actual_frames
 
             self._t_point = np.arange(n_frames) / self.fs_point
             self._t_analog = np.arange(n_frames * analog_per_frame) / self.fs_analog
@@ -203,7 +206,7 @@ class C3DMan:
                 f = interp1d(
                     self._t_point[m_valid], trajectory[m_valid],
                     axis=0, kind='cubic',
-                    bounds_error=False, fill_value=np.nan,   # NaN at gap ends
+                    bounds_error=False, fill_value=np.nan, # NaN at gap ends
                 )
             else:
                 f = interp1d(
@@ -241,7 +244,6 @@ class C3DMan:
             t=self._t_analog.copy(),
         )
 
-
 def convert_accel(
         accel_data: npt.NDArray,
         gen_params: GenAnalogParams = {
@@ -264,12 +266,6 @@ def convert_accel(
     When a session exports accelerometers in m/s² mode instead, this function
     reverses the conversion so the MLP receives the same signal domain it was
     trained on.
-
-    The default gen_params and acc_params match our lab's accelerometer hardware
-    and the Vicon export settings used to produce the MLP training data.  These
-    should NOT be changed unless a new model is trained on data with different
-    parameters — the training code lives in the companion repo
-    (hexapod-inertial-force-removal), not here.
 
     Args:
         accel_data (npt.NDArray): Accelerometer data represented as acceleration (m/s)
