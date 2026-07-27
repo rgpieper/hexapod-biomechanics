@@ -1,37 +1,32 @@
-"""Stage 3 -- second-order mechanical impedance identification.
+"""Second-order mechanical impedance identification.
 
-Fits the model  tau = I*alpha + B*omega + K*theta  to the bootstrap-isolated
-perturbation response produced by Stage 2 (`isolation.py`).  Each bootstrap
-iteration yields one (K, B, I) triplet via ordinary least squares.
+Fits τ = Iα + Bω + Kθ to bootstrap-isolated perturbation trajectories
+via ordinary least squares. Each bootstrap iteration yields one (K, B, I)
+triplet, producing a distribution of fitted parameters.
 
-Two isolation paths determine where signals get their one Savitzky-Golay pass:
+Three isolation paths control where the single Savitzky-Golay pass is
+applied:
 
-  - **DTS** (differentiate-then-subtract, primary): all signals independently
-    filtered at Stage 1, subtracted at Stage 2.  Stage 3 uses them as-is.
-  - **STD** (subtract-then-differentiate, secondary): raw unfiltered angle is
-    subtracted at Stage 2; Stage 3 applies a single sav-gol pass (deriv 0/1/2)
-    to produce filtered theta, omega, and alpha from the isolated angle.
+  - DTS (default): all signals are independently filtered upstream and
+    used as-is.
+  - STD: a single sav-gol pass at fit time produces θ, ω, α from the raw
+    isolated angle.
+  - GONIO_STD: same as STD but uses the Delsys goniometer-measured DF/PF
+    angle (`iso.gonio_df_pf`) as θ. Requires the bootstrap iterations to
+    carry a non-None `gonio_df_pf`.
 
-Torque always comes from Stage 1's one-pass-filtered inverse dynamics
-regardless of path.
+Torque always comes from the inverse-dynamics output regardless of path.
 
-Sign convention
----------------
-Inverse dynamics computes M_ank: the moment the ankle joint exerts **on the
-foot segment** (Newton-Euler free body of the foot).  The impedance model
-describes the ankle's passive mechanical response — the reaction moment the
-ankle exerts **back on the shank** in response to imposed motion.  These are
-equal and opposite (Newton's third law), so we negate the measured torque
-before fitting:  ``y = -tau_measured``.  Positive K then means the ankle
-resists dorsiflexion with a plantarflexion moment, which is the expected
-passive stiffness behaviour.
+Sign convention: inverse dynamics computes M_ank, the moment the ankle
+joint exerts on the foot segment (Newton-Euler free body of the foot).
+The impedance model describes the ankle's reaction back on the shank —
+equal and opposite — so we negate before fitting (``y = -tau_measured``).
+Positive K then means the ankle resists dorsiflexion with a
+plantarflexion moment, which is the expected passive stiffness.
 
-Persistence
------------
-`save_impedance` writes one HDF5 per condition containing:
-  - per-iteration impedance parameters (K, B, I, mass-normalised variants, VAF)
-  - the exact trajectories (theta, omega, alpha, tau) fed to the fit, so every
-    triplet is traceable to the signals it was fit from.
+`save_impedance` writes one HDF5 per condition with the per-iteration
+parameters and the exact trajectories fed to the fit, so every (K, B, I)
+triplet is traceable to the signals it was fit from.
 """
 
 from dataclasses import dataclass
@@ -44,6 +39,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.signal import savgol_filter
 
+from hexapod_biomechanics.config import FILT_POLY, FILT_WINDOW_DURATION_S
 from hexapod_biomechanics.isolation import IsolatedPerturbation
 
 # DF axis index in the JCS decomposition.
@@ -69,7 +65,7 @@ class ImpedanceResult:
         body_mass_kg: Subject body mass used for normalisation.
         fs_hz: Sampling frequency [Hz].
         dynamics: "full" or "static" -- which torque variant was used.
-        isolation_path: "dts" or "std" -- which signal-derivation path.
+        isolation_path: "dts", "std", or "gonio_std" -- which signal-derivation path.
         rezero: Whether first-sample subtraction was applied to theta and tau.
         time: (M,) seconds relative to perturbation onset.
         K: (N,) stiffness [Nm/rad].
@@ -133,8 +129,8 @@ def fit_impedance(
     dynamics: str = "static",
     isolation_path: str = "dts",
     rezero: bool = True,
-    filt_window_duration: float = 0.05,
-    filt_poly: int = 4,
+    filt_window_duration: float = FILT_WINDOW_DURATION_S,
+    filt_poly: int = FILT_POLY,
 ) -> ImpedanceResult:
     """Fit the 2nd-order impedance model to bootstrap-isolated perturbation data.
 
@@ -144,10 +140,10 @@ def fit_impedance(
         side: "right" or "left".
         perturbation_pct: Perturbation stance percentage (e.g. 50, 20).
         dynamics: "full" or "static" -- selects which torque variant.
-        isolation_path: "dts" (primary) or "std" (secondary).
+        isolation_path: "dts", "std", or "gonio_std" -- see module docstring.
         rezero: If True, subtract the first sample from theta and tau.
-        filt_window_duration: STD only -- sav-gol window length [s].
-        filt_poly: STD only -- sav-gol polynomial order.
+        filt_window_duration: STD/GONIO_STD only -- sav-gol window length [s].
+        filt_poly: STD/GONIO_STD only -- sav-gol polynomial order.
 
     Returns:
         An ImpedanceResult containing per-iteration parameters and the exact
@@ -157,18 +153,27 @@ def fit_impedance(
         raise ValueError("isolated is empty.")
     if dynamics not in ("full", "static"):
         raise ValueError(f"dynamics must be 'full' or 'static', got {dynamics!r}.")
-    if isolation_path not in ("dts", "std"):
+    if isolation_path not in ("dts", "std", "gonio_std"):
         raise ValueError(
-            f"isolation_path must be 'dts' or 'std', got {isolation_path!r}."
+            f"isolation_path must be 'dts', 'std', or 'gonio_std', "
+            f"got {isolation_path!r}."
         )
+    if isolation_path == "gonio_std":
+        missing = [i for i, iso in enumerate(isolated) if iso.gonio_df_pf is None]
+        if missing:
+            raise ValueError(
+                f"isolation_path='gonio_std' requires every iteration to have "
+                f"gonio_df_pf populated; {len(missing)}/{len(isolated)} are "
+                f"None. Run bootstrap_isolate on trials with Delsys data."
+            )
 
     fs = isolated[0].fs_hz
     time = isolated[0].time
     n_iter = len(isolated)
     n_samples = len(time)
 
-    # STD: pre-compute sav-gol filter window (in samples).
-    if isolation_path == "std":
+    # STD / GONIO_STD: pre-compute sav-gol filter window (in samples).
+    if isolation_path in ("std", "gonio_std"):
         filt_win = int(fs * filt_window_duration)
         if filt_win % 2 == 0:
             filt_win += 1
@@ -191,13 +196,14 @@ def fit_impedance(
     for i, iso in enumerate(isolated):
         # --- Select signals based on isolation path ---
         if isolation_path == "dts":
-            # DTS: all signals already one-pass filtered at Stage 1.
+            # DTS: signals already one-pass filtered upstream.
             theta_i = iso.alpha_filt.copy()            # (M,) rad
             omega_i = iso.omega_jcs[:, _DF_AXIS].copy()  # (M,) rad/s
             alpha_i = iso.foot_alpha_jcs[:, _DF_AXIS].copy()  # (M,) rad/s^2
         else:
-            # STD: apply single sav-gol pass to raw isolated angle.
-            raw_angle = iso.alpha  # (M,) raw DF angle
+            # STD / GONIO_STD: apply single sav-gol pass to raw isolated angle.
+            # The only difference is the angle source (Vicon vs goniometer).
+            raw_angle = iso.alpha if isolation_path == "std" else iso.gonio_df_pf
             theta_i = savgol_filter(
                 raw_angle, window_length=filt_win, polyorder=filt_poly,
                 deriv=0, delta=dt, axis=0,
