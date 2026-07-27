@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 import numpy as np
 import numpy.typing as npt
+from hexapod_biomechanics.config import FILT_POLY, FILT_WINDOW_DURATION_S
 from hexapod_biomechanics.utils import differentiate_rotation, normalize
 from scipy.signal import savgol_filter
 from scipy.constants import g
@@ -70,8 +71,8 @@ class AnkleID:
             o_ajc: npt.NDArray,
             R_F: npt.NDArray,
             COM_F: Optional[npt.NDArray] = None,
-            filt_window_duration: float = 0.05, # seconds, ~20-30Hz cutoff,
-            filt_poly: int = 4
+            filt_window_duration: float = FILT_WINDOW_DURATION_S,
+            filt_poly: int = FILT_POLY,
     ) -> AnkleDynamics:
         """Compute inverse dynamics of the foot to determine ankle forces and moments.
 

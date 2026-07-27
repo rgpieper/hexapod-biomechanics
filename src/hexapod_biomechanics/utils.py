@@ -374,7 +374,7 @@ def get_body_mass(raw_forces: npt.ArrayLike) -> float:
         raw_forces: (N, 8) array of raw Kistler channels in the standard order
             [FX12, FX34, FY14, FY23, FZ1, FZ2, FZ3, FZ4] — matches
             `config.KISTLER_RAW_CHANNELS` and the column layout produced by
-            `C3DMan.get_analogs(session_config.kistler_raw_analog_pairs())`.
+            `C3DMan.get_analogs(config.kistler_raw_analog_pairs(c3d_man))`.
 
     Returns:
         Body mass [kg].

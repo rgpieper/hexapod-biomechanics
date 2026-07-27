@@ -1,7 +1,7 @@
 """Session config: per-session parameters backed by TOML with auto-detection.
 
 The biomechanics pipeline operates on c3d files where naming conventions
-(marker prefixes, Vicon device IDs, accelerometer mode) vary per session. This
+(marker prefixes, Vicon device IDs, perturbation axis) vary per session. This
 module centralizes all such variability into a `SessionConfig` dataclass.
 
 Lab-wide defaults (standard anatomical marker names, hexapod marker names) are
@@ -13,15 +13,15 @@ Typical workflow:
     # One-time per session, pointing at the session directory (which contains
     # a raw_data/ subdir of c3d files):
     config = build_session_config(
-        session_dir="subjects/C0111085/11082025",
-        subject_id="C0111085",
+        session_dir="subjects/RP041026/15102026",
+        subject_id="RP041026",
         body_mass=70.0,
         sex="m",
     )
-    save_session_config(config, "subjects/C0111085/11082025/session.toml")
+    save_session_config(config, "subjects/RP041026/15102026/session.toml")
 
     # Each analysis run:
-    config = load_session_config("subjects/C0111085/11082025/session.toml")
+    config = load_session_config("subjects/RP041026/15102026/session.toml")
 
 Static blocks: `build_session_config` scans `session_dir/raw_data/` for
 `static*.c3d` files and groups all non-static c3ds under the *first* static by
@@ -71,11 +71,21 @@ STANDARD_ANKLE_MARKERS = {
 # Unprefixed hexapod marker names (subject session config supplies the prefix).
 HEXAPOD_MARKERS = ["Hexapod00", "Hexapod10", "Hexapod11"]
 
-# The 8 raw Kistler channel labels (stable across all sessions).
+# The 8 raw Kistler channel labels.
 KISTLER_RAW_CHANNELS = [
     "Raw.FX12", "Raw.FX34", "Raw.FY14", "Raw.FY23",
     "Raw.FZ1", "Raw.FZ2", "Raw.FZ3", "Raw.FZ4",
 ]
+
+# Savitzky-Golay filter parameters used across all biomechanics filtering
+# (inverse dynamics, angle filtering in process_trials, STD/GONIO_STD path in
+# impedance fitting, and post-isolation angle differentiation). Single source
+# of truth for the lab-wide filter behavior. Change here to globally adjust
+# filtering across the pipeline; downstream functions bind these as kwarg
+# defaults at definition time, so a fresh script invocation picks up the new
+# values everywhere. ~20-30 Hz lowpass cutoff at typical 1 kHz analog rate.
+FILT_WINDOW_DURATION_S = 0.085   # sav-gol window length [s]
+FILT_POLY = 4                   # sav-gol polynomial order
 
 # Regex patterns used during auto-detection.
 _KISTLER_RAW_DESC_RE = re.compile(r"^Kistler Force Plate [\d.]+::Raw \[(\d+)\]$")
@@ -96,21 +106,12 @@ class SessionConfig:
 
     Attributes:
         subject_id (str): Subject ID used as marker prefix in c3d files
-            (e.g. "C0111085").
+            (e.g. "RP041026").
         sex (str): "m" or "f" — used for anthropometric inertial parameters.
         body_mass (float): Subject body mass in kg.
-        session_id (str): Session identifier (matches data folder name — for
-            this lab it's typically the session date as DDMMYYYY, but any
-            unique string works).
+        session_id (str): Session identifier - typically the session date as DDMMYYYY
         hexapod_prefix (str): Case-sensitive hexapod marker prefix in c3d
             (usually "hexapod", occasionally "Hexapod").
-        hexapod_kistler_device_id (int): Vicon device ID of the hexapod
-            Kistler's raw data block, i.e. the N in "[Kistler Force Plate
-            2.0.0.0::Raw [N]]".
-        accel_mode (str): "accelerometer" if accelerometers are exported as
-            m/s^2, "generic_analog" if exported as raw voltage.
-        accel_device_ids (list[int]): Vicon device IDs of the 4 accelerometer
-            sensors (e.g. [19, 20, 21, 22] or [33, 34, 35, 36]).
         marker_overrides (dict): Optional per-side overrides when subject
             deviates from STANDARD_ANKLE_MARKERS. Structure:
             {"right": {"medial_malleolus": "RMANK2"}, "left": {...}}.
@@ -121,7 +122,7 @@ class SessionConfig:
             block; dynamic trials listed under a static are processed using
             its AnkleFrame/AnkleID solvers. Stems are c3d filenames without
             the `.c3d` extension. Default (from `build_session_config`): all
-            dynamic trials grouped under the last static; user re-groups by
+            dynamic trials grouped under the first static; user re-groups by
             editing the TOML.
         direction_side_map (dict): Mapping of trial-filename direction token
             (e.g. "fwd", "rev") → ankle side ("right" or "left") that the
@@ -143,11 +144,6 @@ class SessionConfig:
 
     # Auto-detected Vicon parameters
     hexapod_prefix: str
-    hexapod_kistler_device_id: int
-
-    # Accelerometer
-    accel_mode: str
-    accel_device_ids: list[int]
 
     # Marker overrides
     marker_overrides: dict = field(default_factory=dict)
@@ -202,36 +198,6 @@ class SessionConfig:
         """Return the 3 full hexapod marker labels (with prefix)."""
         return [f"{self.hexapod_prefix}:{m}" for m in HEXAPOD_MARKERS]
 
-    def kistler_raw_analog_pairs(self) -> list[tuple[str, str]]:
-        """Return the 8 (description, label) pairs for hexapod Kistler raw data.
-
-        Suitable for passing directly to C3DMan.get_analogs.
-        """
-        desc = f"Kistler Force Plate 2.0.0.0::Raw [{self.hexapod_kistler_device_id}]"
-        return [(desc, ch) for ch in KISTLER_RAW_CHANNELS]
-
-    def accel_analog_pairs(self) -> list[tuple[str, str]]:
-        """Return the 12 (description, label) pairs for accelerometer data.
-
-        Ordered sensor-by-sensor, axis-by-axis (X, Y, Z).
-        """
-        if self.accel_mode == "accelerometer":
-            desc_template = "Analog Accelerometer::Acceleration [{id},{axis}]"
-            labels = ["Acceleration.X", "Acceleration.Y", "Acceleration.Z"]
-        elif self.accel_mode == "generic_analog":
-            desc_template = "Generic Analog::Electric Potential [{id},{axis}]"
-            labels = ["Electric Potential.X", "Electric Potential.Y", "Electric Potential.Z"]
-        else:
-            raise ValueError(f"Unknown accel_mode: {self.accel_mode!r}")
-
-        pairs = []
-        for sensor_id in self.accel_device_ids:
-            for axis_idx, label in enumerate(labels, start=1):
-                pairs.append(
-                    (desc_template.format(id=sensor_id, axis=axis_idx), label)
-                )
-        return pairs
-
 
 # ---------------------------------------------------------------------------
 # Auto-detection helpers
@@ -251,13 +217,17 @@ def _detect_hexapod_prefix(c3d_man: C3DMan) -> str:
     )
 
 
-def _detect_hexapod_kistler_id(c3d_man: C3DMan) -> int:
+def detect_hexapod_kistler_id(c3d_man: C3DMan) -> int:
     """Identify the hexapod Kistler's Vicon device ID via signal energy.
 
     When multiple Kistler raw data blocks are exported, only the hexapod's
     Kistler sees body-weight loading during a trip. This function computes
     the RMS of the four vertical (FZ) raw channels per candidate block and
     returns the device ID with the largest RMS.
+
+    Called per-trial at processing time because the Vicon device ID can
+    change mid-session (e.g. when Nexus is restarted between blocks), so a
+    session-level cached value is unsafe.
     """
     candidate_ids = []
     descriptions = c3d_man.analog_map.index.get_level_values("Description").unique()
@@ -290,8 +260,23 @@ def _detect_hexapod_kistler_id(c3d_man: C3DMan) -> int:
     return best_id
 
 
-def _detect_accel(c3d_man: C3DMan) -> tuple[str, list[int]]:
+def kistler_raw_analog_pairs(c3d_man: C3DMan) -> list[tuple[str, str]]:
+    """Return the 8 (description, label) pairs for the hexapod Kistler in a c3d.
+
+    Detects the hexapod's Vicon device ID via `detect_hexapod_kistler_id` and
+    builds the (description, label) pairs ready for `C3DMan.get_analogs`. Run
+    per-trial because the device ID can vary across c3ds within one session.
+    """
+    dev_id = detect_hexapod_kistler_id(c3d_man)
+    desc = f"Kistler Force Plate 2.0.0.0::Raw [{dev_id}]"
+    return [(desc, ch) for ch in KISTLER_RAW_CHANNELS]
+
+
+def detect_accel(c3d_man: C3DMan) -> tuple[str, list[int]]:
     """Detect accelerometer export mode and the 4 sensor device IDs.
+
+    Called per-trial at processing time because both the mode and IDs can
+    change mid-session if Vicon is restarted between blocks.
 
     Returns:
         (mode, device_ids): mode is "accelerometer" or "generic_analog";
@@ -326,6 +311,31 @@ def _detect_accel(c3d_man: C3DMan) -> tuple[str, list[int]]:
         f"Potential' devices with X/Y/Z channels. Found: accelerometer_mode="
         f"{sorted(accel_ids)}, generic_analog_xyz_mode={sorted(volt_ids_with_xyz)}."
     )
+
+
+def accel_analog_pairs(c3d_man: C3DMan) -> tuple[str, list[tuple[str, str]]]:
+    """Return the export mode and 12 (description, label) accelerometer pairs.
+
+    Detects mode + device IDs via `detect_accel` and builds the pairs
+    sensor-by-sensor, axis-by-axis (X, Y, Z) for `C3DMan.get_analogs`.
+    Returns the mode alongside the pairs because `convert_accel` is only
+    applied when the c3d exported m/s^2 (mode == "accelerometer").
+    """
+    mode, device_ids = detect_accel(c3d_man)
+    if mode == "accelerometer":
+        desc_template = "Analog Accelerometer::Acceleration [{id},{axis}]"
+        labels = ["Acceleration.X", "Acceleration.Y", "Acceleration.Z"]
+    else:
+        desc_template = "Generic Analog::Electric Potential [{id},{axis}]"
+        labels = ["Electric Potential.X", "Electric Potential.Y", "Electric Potential.Z"]
+
+    pairs = []
+    for sensor_id in device_ids:
+        for axis_idx, label in enumerate(labels, start=1):
+            pairs.append(
+                (desc_template.format(id=sensor_id, axis=axis_idx), label)
+            )
+    return mode, pairs
 
 
 def _check_marker_availability(c3d_man: C3DMan, subject_id: str) -> dict:
@@ -394,12 +404,12 @@ def build_session_config(
     Args:
         session_dir (str | Path): Path to the session directory (which
             contains a `raw_data/` subdir of c3d files), e.g.
-            "subjects/C0111085/11082025".
-        subject_id (str): Subject ID (the marker prefix, e.g. "C0111085").
+            "subjects/RP041026/15102026".
+        subject_id (str): Subject ID (the marker prefix, e.g. "RP041026").
         body_mass (float): Subject body mass in kg.
         sex (str): "m" or "f".
         session_id (str | None): Session identifier. Defaults to
-            `session_dir.name` (e.g. "11082025").
+            `session_dir.name` (e.g. "15102026").
 
     Returns:
         SessionConfig: Populated config with auto-detected Vicon parameters
@@ -425,8 +435,6 @@ def build_session_config(
     c3d_man = C3DMan(str(sample))
 
     hexapod_prefix = _detect_hexapod_prefix(c3d_man)
-    hexapod_kistler_device_id = _detect_hexapod_kistler_id(c3d_man)
-    accel_mode, accel_device_ids = _detect_accel(c3d_man)
 
     missing = _check_marker_availability(c3d_man, subject_id)
     if missing:
@@ -443,9 +451,6 @@ def build_session_config(
         body_mass=body_mass,
         session_id=session_id or session_dir.name,
         hexapod_prefix=hexapod_prefix,
-        hexapod_kistler_device_id=hexapod_kistler_device_id,
-        accel_mode=accel_mode,
-        accel_device_ids=accel_device_ids,
         marker_overrides={},
         static_blocks=static_blocks,
     )
@@ -455,7 +460,9 @@ def save_session_config(config: SessionConfig, path: str | Path) -> None:
     """Write a SessionConfig to a TOML file.
 
     The TOML structure groups fields into [subject], [session], [vicon],
-    [accelerometer], and [markers] sections for readability.
+    [direction_side_map], [hexapod], and [static_blocks] sections for
+    readability. [markers] is written only when `marker_overrides` is
+    non-empty.
     """
     doc = {
         "subject": {
@@ -468,11 +475,6 @@ def save_session_config(config: SessionConfig, path: str | Path) -> None:
         },
         "vicon": {
             "hexapod_prefix": config.hexapod_prefix,
-            "hexapod_kistler_device_id": config.hexapod_kistler_device_id,
-        },
-        "accelerometer": {
-            "mode": config.accel_mode,
-            "device_ids": config.accel_device_ids,
         },
         "direction_side_map": config.direction_side_map,
         "hexapod": {
@@ -501,9 +503,6 @@ def load_session_config(path: str | Path) -> SessionConfig:
         body_mass=doc["subject"]["body_mass"],
         session_id=doc["session"]["id"],
         hexapod_prefix=doc["vicon"]["hexapod_prefix"],
-        hexapod_kistler_device_id=doc["vicon"]["hexapod_kistler_device_id"],
-        accel_mode=doc["accelerometer"]["mode"],
-        accel_device_ids=list(doc["accelerometer"]["device_ids"]),
         marker_overrides=doc.get("markers", {}),
         static_blocks={k: list(v) for k, v in doc.get("static_blocks", {}).items()},
         direction_side_map=dict(

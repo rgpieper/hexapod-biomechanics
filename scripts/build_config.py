@@ -3,8 +3,8 @@
 Run from the project root:
 
     uv run python scripts/build_config.py \\
-        subjects/RP081721/11082025 \\
-        --subject-id RP081721 --body-mass 75.2 --sex m
+        subjects/RP041026/15102026 \\
+        --subject-id RP041026 --body-mass 75.2 --sex m
 
 Scans `<session_dir>/raw_data/` for `static*.c3d` + dynamic trials,
 auto-detects Vicon parameters (hexapod prefix case, Kistler device ID,
@@ -69,14 +69,7 @@ def build_config(
         f"  subject={config.subject_id}  session={config.session_id}  "
         f"body_mass={config.body_mass}kg  sex={config.sex}"
     )
-    print(
-        f"  hexapod_prefix={config.hexapod_prefix!r}  "
-        f"kistler_id={config.hexapod_kistler_device_id}"
-    )
-    print(
-        f"  accel_mode={config.accel_mode!r}  "
-        f"accel_device_ids={config.accel_device_ids}"
-    )
+    print(f"  hexapod_prefix={config.hexapod_prefix!r}")
     print(f"  statics={n_statics}  dynamic trials grouped={n_dynamics}")
     print(
         "\nReview the generated session.toml — in particular "
@@ -94,7 +87,7 @@ def main() -> None:
     parser.add_argument(
         "--subject-id",
         required=True,
-        help="Subject ID used as marker prefix in c3d files (e.g. RP081721).",
+        help="Subject ID used as marker prefix in c3d files (e.g. RP041026).",
     )
     parser.add_argument(
         "--body-mass",
