@@ -1,7 +1,7 @@
 """Fit ankle impedance and visualise the results for one (session, side, pct).
 
-Runs the full Stage 2 + Stage 3 pipeline on a processed session's condition
-HDF5 files and produces two figures:
+Runs bootstrap isolation and impedance fitting on a processed session's
+condition HDF5 files and produces two figures:
 
     1. Isolation summary (4 rows x 2 cols).
        Left col: mean +/- 1 std of unsubtracted perturbed and nominal
@@ -21,7 +21,7 @@ HDF5 files and produces two figures:
 Run from the project root:
 
     uv run python scripts/fit_impedance.py \\
-        subjects/RP081721/11082025 right 50
+        subjects/RP041026/15102026 right 50
 
 Interactive by default (matplotlib windows). With --save DIR, writes PNGs.
 With --save-h5, writes the ImpedanceResult to the session's conditions dir.
@@ -60,7 +60,7 @@ NMM_TO_NM = 1e-3
 
 
 # ---------------------------------------------------------------------------
-# Isolation summary figure (adapted from plot_isolated.py)
+# Isolation summary figure
 # ---------------------------------------------------------------------------
 
 # Row layout for the isolation figure.  Each entry maps a display row to the
@@ -76,19 +76,30 @@ _ISO_ROW_TEMPLATE = [
     {"label": "Foot acceleration", "unit": "rad/s\u00b2",
      "trial_attr": "foot_alpha_jcs", "iso_attr": "foot_alpha_jcs",
      "is_3d": True, "scale": 1.0},
+    # Torque scale is negative: combines N*mm -> N*m conversion with the
+    # sign flip applied by `fit_impedance` (M_ank -> reaction on shank by
+    # Newton's 3rd law). Keeps the isolation figure consistent with the
+    # impedance-fit figure, which reads pre-negated `result.tau`.
     {"label": "Ankle torque", "unit": "N\u00b7m",
      "trial_attr": None, "iso_attr": None,   # filled by _build_iso_spec
-     "is_3d": True, "scale": NMM_TO_NM},
+     "is_3d": True, "scale": -NMM_TO_NM},
 ]
 
 
-def _build_iso_spec(dynamics: str, isolation_path: str) -> list[dict]:
+def _build_iso_spec(dynamics: str, isolation_path: str, side: str) -> list[dict]:
     """Resolve path-dependent fields in the isolation row spec."""
     spec = [dict(r) for r in _ISO_ROW_TEMPLATE]
-    # Angle row: show the variant that matches the isolation path.
+    # Angle row: show the variant that matches the isolation path. For
+    # gonio_std the left column pulls from `delsys.channels[gonio_<side>_df_pf]`
+    # via `from_delsys=True`; the right column reads `iso.gonio_df_pf`.
     if isolation_path == "std":
         spec[0]["trial_attr"] = "alpha"
         spec[0]["iso_attr"] = "alpha"
+    elif isolation_path == "gonio_std":
+        spec[0]["label"] = "Ankle angle (gonio)"
+        spec[0]["trial_attr"] = f"gonio_{side}_df_pf"
+        spec[0]["iso_attr"] = "gonio_df_pf"
+        spec[0]["from_delsys"] = True
     # Torque row: static or full.
     tau_attr = f"tau_{dynamics}"
     spec[-1]["trial_attr"] = tau_attr
@@ -102,6 +113,13 @@ def _extract_df(obj, attr: str, is_3d: bool) -> np.ndarray:
     return arr[:, DF_AXIS] if is_3d else arr
 
 
+def _extract_trial_signal(t: TrialResult, row: dict) -> np.ndarray:
+    """Pull a trial's stance-period signal, honoring the gonio-from-delsys flag."""
+    if row.get("from_delsys"):
+        return t.delsys.channels[row["trial_attr"]].v
+    return _extract_df(t, row["trial_attr"], row["is_3d"])
+
+
 def _stack_pert_unsubtracted(
     perturbed: list[TrialResult], spec: list[dict],
 ) -> dict[str, np.ndarray]:
@@ -111,7 +129,7 @@ def _stack_pert_unsubtracted(
         sl = slice(t.perturbation.window_start_sample,
                    t.perturbation.window_end_sample)
         for r in spec:
-            sig = _extract_df(t, r["trial_attr"], r["is_3d"])
+            sig = _extract_trial_signal(t, r)
             stacks[r["label"]].append(sig[sl])
     return {k: np.stack(v) for k, v in stacks.items()}
 
@@ -124,7 +142,7 @@ def _stack_nom_unsubtracted(
     stacks: dict[str, list[np.ndarray]] = {r["label"]: [] for r in spec}
     for t in nominal:
         for r in spec:
-            sig = _extract_df(t, r["trial_attr"], r["is_3d"])
+            sig = _extract_trial_signal(t, r)
             stacks[r["label"]].append(sig[start:end])
     return {k: np.stack(v) for k, v in stacks.items()}
 
@@ -335,16 +353,19 @@ def main() -> None:
     ap.add_argument("side", choices=("right", "left"))
     ap.add_argument("pct", type=int,
                     help="Perturbation stance percentage, e.g. 50.")
-    # Stage 2 options.
+    # Bootstrap options.
     ap.add_argument("--seed", type=int, default=42,
                     help="RNG seed for bootstrap subsampling.")
     ap.add_argument("--n-iterations", type=int, default=100)
     ap.add_argument("--sample-fraction", type=float, default=0.6)
-    # Stage 3 options.
+    # Fit options.
     ap.add_argument("--dynamics", choices=("static", "full"), default="static",
                     help="Which dynamics variant for torque.")
-    ap.add_argument("--isolation-path", choices=("dts", "std"), default="dts",
-                    help="DTS (primary) or STD (secondary) isolation path.")
+    ap.add_argument("--isolation-path",
+                    choices=("dts", "std", "gonio_std"), default="dts",
+                    help="Isolation path: DTS (Vicon angles, pre-filtered), "
+                         "STD (Vicon angles, post-subtraction filter), or "
+                         "GONIO_STD (Delsys goniometer angle).")
     ap.add_argument("--no-rezero", action="store_true",
                     help="Disable first-sample re-zeroing of theta and tau.")
     # Output options.
@@ -354,7 +375,7 @@ def main() -> None:
                     help="Write the ImpedanceResult HDF5 to conditions/.")
     args = ap.parse_args()
 
-    # Load Stage 1 condition files.
+    # Load processed condition files.
     conditions_dir = args.session_dir / "conditions"
     pert_path = conditions_dir / f"{args.side}_pert_{args.pct}.h5"
     nom_path = conditions_dir / f"{args.side}_nom.h5"
@@ -368,17 +389,33 @@ def main() -> None:
     print(f"Loaded {len(perturbed)} perturbed, {len(nominal)} nominal trials"
           f"  (body mass {body_mass:.1f} kg)")
 
-    # Stage 2: bootstrap isolation.
+    # Drop nominal trials too short to cover the bootstrap window in the
+    # worst case (subsample mean onset = max perturbed onset). Avoids
+    # per-iteration overruns in bootstrap_isolate for sessions with
+    # outlier-short stance periods.
+    p0 = perturbed[0].perturbation
+    post_frames = p0.window_end_sample - p0.onset_sample
+    required = max(t.perturbation.onset_sample for t in perturbed) + post_frames
+    short = [t for t in nominal if len(t.alpha) < required]
+    if short:
+        print(f"Dropping {len(short)} short nominal trial(s) "
+              f"(< {required} samples):")
+        for t in short:
+            print(f"  {t.trial_name}: stance={len(t.alpha)} "
+                  f"(short by {required - len(t.alpha)})")
+        nominal = [t for t in nominal if len(t.alpha) >= required]
+
+    # Bootstrap isolation.
     isolated = bootstrap_isolate(
         perturbed, nominal,
         n_iterations=args.n_iterations,
         sample_fraction=args.sample_fraction,
         seed=args.seed,
     )
-    print(f"Stage 2: {len(isolated)} bootstrap iterations,"
+    print(f"Isolation: {len(isolated)} bootstrap iterations,"
           f" window = {len(isolated[0].time)} samples")
 
-    # Stage 3: impedance fitting.
+    # Impedance fitting.
     result = fit_impedance(
         isolated, body_mass,
         side=args.side,
@@ -392,7 +429,7 @@ def main() -> None:
     # Optionally save the impedance HDF5.
     if args.save_h5:
         h5_name = (f"{args.side}_pert_{args.pct}_impedance"
-                    f"_{args.isolation_path}.h5")
+                   f"_{args.isolation_path}_{args.dynamics}.h5")
         h5_path = conditions_dir / h5_name
         save_impedance(h5_path, result)
         print(f"Wrote {h5_path}")
@@ -400,10 +437,14 @@ def main() -> None:
     # Build figures.
     session_label = (f"{args.session_dir.parent.name}/"
                      f"{args.session_dir.name}")
-    path_label = ("DTS (primary)" if args.isolation_path == "dts"
-                  else "STD (secondary)")
+    path_labels = {
+        "dts": "DTS (Vicon angles, pre-filtered)",
+        "std": "STD (Vicon angles, post-subtraction filter)",
+        "gonio_std": "GONIO_STD (Delsys goniometer)",
+    }
+    path_label = path_labels[args.isolation_path]
 
-    iso_spec = _build_iso_spec(args.dynamics, args.isolation_path)
+    iso_spec = _build_iso_spec(args.dynamics, args.isolation_path, args.side)
     fig_iso = build_isolation_figure(
         perturbed, nominal, isolated, iso_spec,
         time_axis=isolated[0].time,
