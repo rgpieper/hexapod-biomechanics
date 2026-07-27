@@ -1,0 +1,64 @@
+# Batch segmentation config for scripts/segment_delsys.py.
+#
+# Copy this next to a session's Delsys block CSVs and fill it in, then run:
+#
+#     uv run python scripts/segment_delsys.py batch \
+#         --config data/delsys_blocks/RP041026/15102026/segment_config.toml
+#
+# Real configs live with the data (under the gitignored data/ tree) so that
+# no subject identifiers end up in version control. Only this template,
+# with placeholder IDs, is committed.
+
+# Where per-trial NPZs are written: <session_dir>/raw_data/delsys/.
+session_dir = "subjects/RP041026/15102026"
+
+# Where the Delsys block CSVs, timing logs, and static CSVs live. Every
+# filename below resolves against this directory.
+block_dir = "data/delsys_blocks/RP041026/15102026"
+
+# Which goniometer Analog channel carries which axis. Varies with the
+# physical wiring — verify per session before trusting the output.
+df_channel = 2
+ie_channel = 1
+
+# Signed deg/V scale per goniometer channel. Negative flips polarity for a
+# reversed mounting. This should come from a bench characterisation of the
+# sensor, NOT from regression against Vicon — the point of the goniometer
+# path is to give a theta measurement independent of the marker data.
+# Channels omitted here fall back to the script's placeholder default and
+# print a warning.
+[gonio_deg_per_volt]
+gonio_right_df_pf = -143.04436769279206
+# gonio_left_df_pf = 142.69
+# gonio_right_ie = 100.0
+# gonio_left_ie = 100.0
+
+# One table per static. The static defines goniometer zero for every block
+# listed under it, mirroring the Vicon static calibration. Each block must
+# appear under exactly one static.
+#
+# `delsys` is the static's own Delsys CSV. Under `blocks`, the key is the
+# block_id (the trial stem prefix before "_trip", matching the Vicon trial
+# names) and the value is that block's Delsys CSV filename. The timing log
+# is assumed to be "<block_id>_log.csv", so it is not listed.
+#
+# Block CSV names are spelled out rather than derived by rule because Trigno
+# Discover appends its own recording index, which rarely matches the block
+# number used by the Vicon trials. Confirm each pairing before relying on it
+# (e.g. check that the log's window extent fits inside the recording, and
+# that the logged windows contain real motion).
+[statics.static_01]
+delsys = "static_1_0.csv"
+
+[statics.static_01.blocks]
+"DelsTrig_20pct_block_01" = "DelsTrig_20pct_block_1_0.csv"
+"DelsTrig_20pct_block_02" = "DelsTrig_20pct_block_2_0.csv"
+"DelsTrig_50pct_block_01" = "DelsTrig_50pct_block_1_0.csv"
+
+# A session with re-placed markers mid-session has a second static; list its
+# blocks in their own table.
+# [statics.static_02]
+# delsys = "static_2_0.csv"
+#
+# [statics.static_02.blocks]
+# "DelsTrig_50pct_block_02" = "DelsTrig_50pct_block_2_0.csv"
