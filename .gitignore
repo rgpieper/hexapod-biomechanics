@@ -6,8 +6,10 @@ dist/
 wheels/
 *.egg-info
 
-# Virtual environments
-.venv
+# Virtual environments. The glob also catches the " 2"/" 3"-suffixed copies
+# a cloud-sync agent leaves behind when the repo lives in a synced folder
+# (see scripts/install.py).
+.venv*
 
 # Subject data and raw captures (too large and/or sensitive for git)
 subjects/
