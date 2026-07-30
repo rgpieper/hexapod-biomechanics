@@ -59,6 +59,10 @@ except ModuleNotFoundError:
     )
 
 from hexapod_biomechanics.impedance import ImpedanceResult, load_impedance
+from hexapod_biomechanics.isolation import (
+    describe_nominal_selection,
+    select_nominal_trials,
+)
 from hexapod_biomechanics.process_trials import TrialResult, load_condition
 
 # DF axis index in the JCS decomposition.
@@ -515,11 +519,11 @@ def main() -> None:
             f"requested {args.path!r} / {args.dynamics!r}."
         )
 
-    # Drop short nominal trials, same rule as fit_impedance.py.
-    p0 = perturbed[0].perturbation
-    post_frames = p0.window_end_sample - p0.onset_sample
-    required = max(t.perturbation.onset_sample for t in perturbed) + post_frames
-    nominal = [t for t in nominal if len(t.alpha) >= required]
+    # Drop short nominal trials, same rule as fit_impedance.py, so the left
+    # column reflects the same trial set the cached fit was built from.
+    sel = select_nominal_trials(perturbed, nominal)
+    print(describe_nominal_selection(sel))
+    nominal = sel.kept
 
     spec = _build_row_spec(args.path, args.dynamics, args.side)
 

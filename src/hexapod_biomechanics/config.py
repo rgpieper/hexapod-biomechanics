@@ -87,6 +87,13 @@ KISTLER_RAW_CHANNELS = [
 FILT_WINDOW_DURATION_S = 0.085   # sav-gol window length [s]
 FILT_POLY = 4                   # sav-gol polynomial order
 
+# Longest unloaded gap treated as part of a single foot contact when isolating
+# the stance period (`utils.longest_contact_slice`). Sized to absorb sensor
+# noise flickering across the load threshold without merging two genuinely
+# separate contacts, which are separated by a swing phase two orders of
+# magnitude longer than this.
+STANCE_GAP_BRIDGE_S = 0.02      # [s]
+
 # Regex patterns used during auto-detection.
 _KISTLER_RAW_DESC_RE = re.compile(r"^Kistler Force Plate [\d.]+::Raw \[(\d+)\]$")
 _ACCEL_ACCEL_DESC_RE = re.compile(r"^Analog Accelerometer::Acceleration \[(\d+),\d\]$")

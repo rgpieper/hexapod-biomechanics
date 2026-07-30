@@ -261,6 +261,114 @@ _NON_ANGLE_FIELDS = (
 _ALL_FIELDS = (*_ANGLE_FIELDS, *_NON_ANGLE_FIELDS)
 
 
+@dataclass
+class NominalSelection:
+    """Which nominal trials are long enough to serve the bootstrap window.
+
+    Every bootstrap iteration slices the nominal trials at a window centered
+    on that iteration's mean onset, so a nominal trial must be long enough to
+    cover the worst case: a subsample whose mean onset equals the latest onset
+    among the perturbed trials. Trials shorter than `required` are dropped.
+
+    `setter_name` records which perturbed trial's onset set the bar, alongside
+    the median onset for comparison. A `setter_onset` far above `median_onset`
+    means one atypical perturbed trial is gating every nominal trial — usually
+    a sign its stance period was mis-segmented, since `onset_sample` is
+    measured from the start of the stance slice.
+    """
+    required: int                    # minimum nominal stance length [samples]
+    kept: list[TrialResult]
+    dropped: list[TrialResult]
+    setter_name: str                 # perturbed trial that set `required`
+    setter_onset: int                # its onset [samples]
+    median_onset: int                # median onset across perturbed [samples]
+
+    @property
+    def drop_fraction(self) -> float:
+        """Fraction of the input nominal trials that were dropped."""
+        total = len(self.kept) + len(self.dropped)
+        return len(self.dropped) / total if total else 0.0
+
+
+def select_nominal_trials(
+    perturbed: Sequence[TrialResult],
+    nominal: Sequence[TrialResult],
+) -> NominalSelection:
+    """Drop nominal trials too short to cover the worst-case bootstrap window.
+
+    Args:
+        perturbed: Perturbed trials, all with populated `perturbation`.
+        nominal: Candidate nominal trials for the same session and side.
+
+    Returns:
+        NominalSelection: The surviving and dropped trials plus the
+        provenance needed to explain the cut.
+
+    Raises:
+        ValueError: If `perturbed` is empty.
+    """
+    if not perturbed:
+        raise ValueError("perturbed is empty.")
+
+    p0 = perturbed[0].perturbation
+    post_frames = p0.window_end_sample - p0.onset_sample
+    onsets = [t.perturbation.onset_sample for t in perturbed]
+    i_max = int(np.argmax(onsets))
+    required = onsets[i_max] + post_frames
+
+    return NominalSelection(
+        required=required,
+        kept=[t for t in nominal if len(t.alpha) >= required],
+        dropped=[t for t in nominal if len(t.alpha) < required],
+        setter_name=perturbed[i_max].trial_name,
+        setter_onset=onsets[i_max],
+        median_onset=int(round(float(np.median(onsets)))),
+    )
+
+
+def describe_nominal_selection(
+    sel: NominalSelection,
+    max_listed: int = 6,
+) -> str:
+    """Render a `NominalSelection` as a human-readable multi-line report.
+
+    Always states the counts, including when nothing is dropped, so a run
+    that silently discards trials can't be mistaken for one that kept them
+    all. The per-trial list is capped at `max_listed` and annotated with how
+    many were withheld, so a large cut can't scroll the summary off-screen.
+    """
+    total = len(sel.kept) + len(sel.dropped)
+    lines = [
+        f"Nominal length filter: need >= {sel.required} samples "
+        f"(latest perturbed onset {sel.setter_onset} + post-onset window)."
+    ]
+    if sel.setter_onset > 2 * sel.median_onset:
+        lines.append(
+            f"  WARNING: the bar is set by {sel.setter_name!r}, whose onset "
+            f"({sel.setter_onset}) is more than double the median across "
+            f"perturbed trials ({sel.median_onset}). `onset_sample` is "
+            f"measured from the start of the stance slice, so an outlier "
+            f"this large usually means that trial's stance was "
+            f"mis-segmented. Check it before trusting this cut."
+        )
+    if not sel.dropped:
+        lines.append(f"  Keeping all {total} nominal trial(s).")
+        return "\n".join(lines)
+
+    lines.append(
+        f"  Dropping {len(sel.dropped)}/{total} nominal trial(s) "
+        f"({sel.drop_fraction:.0%}); {len(sel.kept)} remain."
+    )
+    for t in sel.dropped[:max_listed]:
+        lines.append(
+            f"    {t.trial_name}: stance={len(t.alpha)} "
+            f"(short by {sel.required - len(t.alpha)})"
+        )
+    if len(sel.dropped) > max_listed:
+        lines.append(f"    ... and {len(sel.dropped) - max_listed} more.")
+    return "\n".join(lines)
+
+
 def _validate_and_extract_window(
     perturbed: Sequence[TrialResult],
     nominal: Sequence[TrialResult],

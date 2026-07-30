@@ -240,6 +240,60 @@ def differentiate_rotation(
 
     return omega, alpha
 
+def longest_contact_slice(
+        is_loaded: npt.NDArray,
+        bridge_samples: int = 0,
+    ) -> slice:
+    """Locate the single foot contact in a force-plate loading mask.
+
+    A capture can register the plate as loaded more than once — the
+    contralateral foot brushing it, the platform settling, or the tail of a
+    previous step still decaying. Taking the first-to-last loaded frame would
+    span all of those plus the unloaded frames between them, so this returns
+    only the longest contiguous run, which is the actual step.
+
+    Short dropouts inside a real contact (sensor noise flickering across the
+    threshold) would otherwise split one step into two shorter runs, so gaps
+    up to `bridge_samples` long are filled before the runs are measured.
+
+    Args:
+        is_loaded (npt.NDArray): (N,) boolean mask, True where the plate
+            carries load (e.g. `HexGRF.is_stance`).
+        bridge_samples (int, optional): Maximum unloaded-gap length to treat
+            as part of the contact. Defaults to 0 (no bridging).
+
+    Raises:
+        ValueError: If `is_loaded` is never True.
+
+    Returns:
+        slice: Spans the longest contiguous loaded run.
+
+    Examples:
+        >>> mask = np.array([1, 0, 0, 1, 1, 1, 0, 1], dtype=bool)
+        >>> longest_contact_slice(mask)
+        slice(3, 6, None)
+    """
+    mask = np.asarray(is_loaded, dtype=bool).copy()
+    if not mask.any():
+        raise ValueError("is_loaded is never True — no contact to locate.")
+
+    # Bridge short gaps: any unloaded run no longer than `bridge_samples` that
+    # sits *between* two loaded runs becomes loaded. Leading and trailing gaps
+    # are left alone — they aren't inside a contact.
+    if bridge_samples > 0:
+        loaded_idx = np.flatnonzero(mask)
+        for stop, start in zip(loaded_idx[:-1], loaded_idx[1:]):
+            if 0 < start - stop - 1 <= bridge_samples:
+                mask[stop + 1:start] = True
+
+    # Run boundaries: +1 in the padded difference marks a run start, -1 a stop.
+    edges = np.diff(np.r_[0, mask.astype(np.int8), 0])
+    starts = np.flatnonzero(edges == 1)
+    stops = np.flatnonzero(edges == -1)
+    longest = int(np.argmax(stops - starts))
+
+    return slice(int(starts[longest]), int(stops[longest]))
+
 def find_pert_thresh(
         hex_tjct: npt.NDArray,
         thresh: float,

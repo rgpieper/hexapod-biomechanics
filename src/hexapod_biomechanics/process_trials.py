@@ -19,6 +19,7 @@ from scipy.constants import g
 from scipy.interpolate import interp1d
 
 from hexapod_biomechanics.config import (
+    STANCE_GAP_BRIDGE_S,
     SessionConfig,
     accel_analog_pairs,
     kistler_raw_analog_pairs,
@@ -29,7 +30,11 @@ from hexapod_biomechanics.forces import HexGRF, HexKistler, HexRotAxis
 from hexapod_biomechanics.inverse_dynamics import AnkleDynamics, AnkleID
 from hexapod_biomechanics.kinematics import AnkleFrame, AnkleKinematics
 from hexapod_biomechanics.load_data import C3DMan, convert_accel
-from hexapod_biomechanics.utils import axis_difference, find_pert_thresh
+from hexapod_biomechanics.utils import (
+    axis_difference,
+    find_pert_thresh,
+    longest_contact_slice,
+)
 
 _SIDE_SIGN = {"right": 1, "left": -1}
 
@@ -582,13 +587,18 @@ def compute_trial_intermediates(
         o_ajc=kin.o_ajc, R_F=kin.R_F, COM_F=None,
     )
 
-    # Stance slice
-    stance_idx = np.where(grf.is_stance)[0]
-    if stance_idx.size == 0:
+    # Stance slice — the longest contiguous loaded run, not first-to-last
+    # loaded frame. A capture often registers the plate as loaded more than
+    # once (contralateral foot brushing it, platform settling, the tail of a
+    # previous step), and first-to-last would swallow the unloaded frames
+    # between those events along with the real step.
+    if not grf.is_stance.any():
         raise ValueError(f"Trial {spec.trial_name!r}: no stance frames detected.")
-    i_stance_start = int(stance_idx[0])
-    i_stance_end = int(stance_idx[-1])
-    stance_slice = slice(i_stance_start, i_stance_end + 1)
+    stance_slice = longest_contact_slice(
+        grf.is_stance, bridge_samples=int(round(STANCE_GAP_BRIDGE_S * fs)),
+    )
+    i_stance_start = stance_slice.start
+    i_stance_end = stance_slice.stop - 1
 
     # Angle handling: kin.alpha/beta/gamma are raw arccos outputs (unfiltered).
     # Apply the same Savitzky-Golay filter used by dynamics so every stored

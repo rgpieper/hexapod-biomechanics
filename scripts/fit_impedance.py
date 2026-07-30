@@ -48,7 +48,11 @@ from hexapod_biomechanics.impedance import (
     fit_impedance,
     save_impedance,
 )
-from hexapod_biomechanics.isolation import bootstrap_isolate
+from hexapod_biomechanics.isolation import (
+    bootstrap_isolate,
+    describe_nominal_selection,
+    select_nominal_trials,
+)
 from hexapod_biomechanics.process_trials import TrialResult, load_condition
 
 # DF axis index in the JCS decomposition.
@@ -368,6 +372,10 @@ def main() -> None:
                          "GONIO_STD (Delsys goniometer angle).")
     ap.add_argument("--no-rezero", action="store_true",
                     help="Disable first-sample re-zeroing of theta and tau.")
+    ap.add_argument("--max-nominal-drop", type=float, default=0.2,
+                    help="Abort if the nominal length filter drops more than "
+                         "this fraction of nominal trials (default: 0.2). "
+                         "Use 1.0 to disable the guard.")
     # Output options.
     ap.add_argument("--save", type=Path, default=None,
                     help="Write PNGs to this directory (instead of showing).")
@@ -393,17 +401,22 @@ def main() -> None:
     # worst case (subsample mean onset = max perturbed onset). Avoids
     # per-iteration overruns in bootstrap_isolate for sessions with
     # outlier-short stance periods.
-    p0 = perturbed[0].perturbation
-    post_frames = p0.window_end_sample - p0.onset_sample
-    required = max(t.perturbation.onset_sample for t in perturbed) + post_frames
-    short = [t for t in nominal if len(t.alpha) < required]
-    if short:
-        print(f"Dropping {len(short)} short nominal trial(s) "
-              f"(< {required} samples):")
-        for t in short:
-            print(f"  {t.trial_name}: stance={len(t.alpha)} "
-                  f"(short by {required - len(t.alpha)})")
-        nominal = [t for t in nominal if len(t.alpha) >= required]
+    sel = select_nominal_trials(perturbed, nominal)
+    print(describe_nominal_selection(sel))
+    if sel.drop_fraction > args.max_nominal_drop:
+        raise SystemExit(
+            f"\nRefusing to fit: the length filter drops "
+            f"{sel.drop_fraction:.0%} of nominal trials, above the "
+            f"--max-nominal-drop limit of {args.max_nominal_drop:.0%}.\n"
+            f"A cut this large usually means one perturbed trial with a "
+            f"mis-segmented stance has inflated the requirement, leaving a "
+            f"nominal baseline made of whichever trials happen to share that "
+            f"defect. Inspect the session first:\n"
+            f"  uv run python scripts/plot_trial_stats.py "
+            f"{args.session_dir} {args.side}\n"
+            f"Pass --max-nominal-drop 1.0 to fit anyway."
+        )
+    nominal = sel.kept
 
     # Bootstrap isolation.
     isolated = bootstrap_isolate(
