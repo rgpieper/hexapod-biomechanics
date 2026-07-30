@@ -26,6 +26,16 @@ Two figures:
        Thin translucent line per iteration + thick mean. Same source as
        the right column of the summary.
 
+    3. With-perturbation (5 rows x 1 col). Isolated theta/omega/alpha/tau
+       over the platform angle magnitude across the pert window.
+
+    4. Full stance (5 rows x 1 col). Every trial's whole stance period,
+       nominal in blue and perturbed in red, with condition means.
+
+    5. Perturbation window (5 rows x 1 col). Same rows and style as (4)
+       but cut to the perturbation analysis window and time-aligned to
+       onset -- the unsubtracted raw material the fit actually reads.
+
 Sign convention: torque is always negated to match the sys-id fit
 (impedance.py negates inverse-dynamics M_ank by Newton's 3rd law before
 fitting). The right column / iterations figure pull from the impedance
@@ -357,30 +367,22 @@ def build_with_perturbation_figure(
     return fig
 
 
-def build_full_stance_figure(
-    perturbed: list[TrialResult],
-    nominal: list[TrialResult],
-    dynamics: str,
-    title: str,
-) -> plt.Figure:
-    """Overlay every trial's full-stance trajectory: pos/vel/acc/tau + platform.
+def _per_trial_rows(dynamics: str) -> list[tuple]:
+    """Row spec shared by the full-stance and perturbation-window figures.
 
-    5 rows x 1 col, vs absolute stance time (seconds since stance start).
-    Per-trial signals are plotted at each trial's own length (ragged ends);
-    per-condition mean lines are computed over the common-prefix length
-    (the shortest trial in each condition) so they're well-defined.
+    Returns (label, unit, scale, extractor); each extractor takes a
+    `TrialResult` and returns a 1D (N,) array over the full stance period in
+    canonical SI units, which `scale` then converts to display units.
 
-    Rows always use the canonical DTS-style signals (alpha_filt for position,
-    omega_jcs[:, 0] for velocity, foot_alpha_jcs[:, 0] for acceleration),
-    independent of `--path`, since STD/GONIO_STD don't have per-trial
-    velocity/acceleration equivalents -- their derivatives only exist after
-    the bootstrap-subtracted angle is filtered. Torque honors `--dynamics`.
-    Platform angle uses the newly-stored `hex_tjct` (stance-sliced).
+    Rows always use the canonical DTS-style signals (`alpha_filt` for
+    position, `omega_jcs[:, 0]` for velocity, `foot_alpha_jcs[:, 0]` for
+    acceleration), independent of `--path`, since STD/GONIO_STD have no
+    per-trial velocity/acceleration equivalent -- their derivatives only
+    exist after the bootstrap-subtracted angle is filtered. Torque honors
+    `--dynamics`.
     """
-    # (label, unit, scale, extractor) -- extractor returns a 1D (N,) array
-    # in canonical SI units; `scale` then converts to display units.
     tau_attr = f"tau_{dynamics}"
-    rows = [
+    return [
         ("Ankle position", "deg", RAD_TO_DEG,
          lambda t: t.alpha_filt),
         ("Ankle velocity", "rad/s", 1.0,
@@ -397,6 +399,109 @@ def build_full_stance_figure(
         ("Hexapod angle (magnitude)", "deg", RAD_TO_DEG,
          lambda t: np.abs(t.hex_tjct)),
     ]
+
+
+def build_pert_window_figure(
+    perturbed: list[TrialResult],
+    nominal: list[TrialResult],
+    dynamics: str,
+    title: str,
+) -> plt.Figure:
+    """Per-trial overlays over the perturbation window only, unsubtracted.
+
+    Same rows and per-trial-overlay style as the full-stance figure, but
+    every trial is cut to the perturbation analysis window and time-aligned
+    to onset, so this is the raw material the bootstrap subtraction consumes
+    -- what perturbed and nominal actually look like where the fit reads
+    them, before anything is subtracted.
+
+    Windowing follows the pipeline: each perturbed trial is sliced at its own
+    `pert_window`, and nominal trials are sliced at a single window centered
+    on the mean onset across all perturbed trials (the rule
+    `bootstrap_isolate` uses). Every slice is the same length, so unlike the
+    full-stance figure there are no ragged ends and the means need no
+    common-prefix handling.
+
+    Nominal trials too short for the window are skipped with a printed count
+    rather than raising, since this is a diagnostic view.
+    """
+    rows = _per_trial_rows(dynamics)
+
+    p0 = perturbed[0].perturbation
+    pre_frames = p0.onset_sample - p0.window_start_sample
+    window_len = p0.window_end_sample - p0.window_start_sample
+    fs = perturbed[0].fs_hz
+    t_ms = (np.arange(window_len) - pre_frames) / fs * 1000.0
+
+    mean_onset = int(round(float(np.mean(
+        [t.perturbation.onset_sample for t in perturbed]
+    ))))
+    nom_start = mean_onset - pre_frames
+    nom_slice = slice(nom_start, nom_start + window_len)
+
+    nom_ok = [t for t in nominal
+              if nom_start >= 0 and nom_slice.stop <= len(t.alpha_filt)]
+    if len(nom_ok) < len(nominal):
+        print(f"  Perturbation-window figure: skipping "
+              f"{len(nominal) - len(nom_ok)} nominal trial(s) too short for "
+              f"window [{nom_slice.start}:{nom_slice.stop}].")
+
+    fig, axes = plt.subplots(
+        nrows=len(rows), ncols=1,
+        figsize=(9, 2.3 * len(rows)), sharex=True,
+    )
+    fig.suptitle(title)
+
+    for ax, (label, unit, scale, extract) in zip(axes, rows):
+        nom_stack = np.stack(
+            [extract(t)[nom_slice] for t in nom_ok]
+        ) * scale if nom_ok else None
+        pert_stack = np.stack([
+            extract(t)[t.perturbation.window_start_sample
+                       :t.perturbation.window_end_sample]
+            for t in perturbed
+        ]) * scale
+
+        if nom_stack is not None:
+            for trace in nom_stack:
+                ax.plot(t_ms, trace, color="tab:blue", alpha=0.15,
+                        linewidth=0.7)
+        for trace in pert_stack:
+            ax.plot(t_ms, trace, color="tab:red", alpha=0.15, linewidth=0.7)
+
+        if nom_stack is not None:
+            ax.plot(t_ms, nom_stack.mean(axis=0), color="tab:blue",
+                    linewidth=2.0, label=f"nominal mean (n={len(nom_ok)})")
+        ax.plot(t_ms, pert_stack.mean(axis=0), color="tab:red",
+                linewidth=2.0, label=f"perturbed mean (n={len(perturbed)})")
+
+        ax.set_ylabel(f"{label}\n[{unit}]")
+        ax.axvline(0, color="k", lw=0.5, ls="--", alpha=0.5)
+        ax.grid(True, alpha=0.3)
+
+    axes[0].legend(loc="best", fontsize=8)
+    axes[-1].set_xlabel("Time relative to onset [ms]")
+    fig.tight_layout()
+    return fig
+
+
+def build_full_stance_figure(
+    perturbed: list[TrialResult],
+    nominal: list[TrialResult],
+    dynamics: str,
+    title: str,
+) -> plt.Figure:
+    """Overlay every trial's full-stance trajectory: pos/vel/acc/tau + platform.
+
+    5 rows x 1 col, vs absolute stance time (seconds since stance start).
+    Per-trial signals are plotted at each trial's own length (ragged ends);
+    per-condition mean lines are computed over the common-prefix length
+    (the shortest trial in each condition) so they're well-defined.
+
+    Row sources are documented on `_per_trial_rows`. Platform angle uses the
+    stance-sliced `hex_tjct`.
+    """
+    rows = _per_trial_rows(dynamics)
 
     fig, axes = plt.subplots(
         nrows=len(rows), ncols=1,
@@ -567,6 +672,12 @@ def main() -> None:
                f"{args.side} pert {args.pct}% — "
                f"{args.dynamics} dynamics"),
     )
+    fig_window = build_pert_window_figure(
+        perturbed, nominal, args.dynamics,
+        title=(f"Perturbation-window per-trial trajectories (unsubtracted) — "
+               f"{args.side} pert {args.pct}% — "
+               f"{args.dynamics} dynamics"),
+    )
 
     if args.save is not None:
         args.save.mkdir(parents=True, exist_ok=True)
@@ -575,18 +686,15 @@ def main() -> None:
         iters_path = args.save / f"iterations_{tag}.png"
         pert_path = args.save / f"with_perturbation_{tag}.png"
         full_path = args.save / f"full_stance_{tag}.png"
-        fig_summary.savefig(summary_path, dpi=150)
-        fig_iters.savefig(iters_path, dpi=150)
-        fig_pert.savefig(pert_path, dpi=150)
-        fig_full.savefig(full_path, dpi=150)
-        print(f"Wrote {summary_path}")
-        print(f"Wrote {iters_path}")
-        print(f"Wrote {pert_path}")
-        print(f"Wrote {full_path}")
-        plt.close(fig_summary)
-        plt.close(fig_iters)
-        plt.close(fig_pert)
-        plt.close(fig_full)
+        window_path = args.save / f"pert_window_{tag}.png"
+        for fig, path in (
+            (fig_summary, summary_path), (fig_iters, iters_path),
+            (fig_pert, pert_path), (fig_full, full_path),
+            (fig_window, window_path),
+        ):
+            fig.savefig(path, dpi=150)
+            print(f"Wrote {path}")
+            plt.close(fig)
     else:
         plt.show()
 
