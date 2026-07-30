@@ -314,12 +314,15 @@ def build_with_perturbation_figure(
     # Per-trial hexapod platform angle across the pert window (rad).
     # `hex_tjct` is the hexapod angular position about the perturbation axis
     # (full stance length); slice each trial at its own pert_window so the
-    # band is time-aligned to onset.
-    pert_traj = np.stack([
+    # band is time-aligned to onset. Magnitude, not signed value: the axis is
+    # fixed in the global frame, so trials walked in opposite directions carry
+    # opposite signs for the same physical ankle perturbation, and a signed
+    # average would cancel them to zero.
+    pert_traj = np.abs(np.stack([
         t.hex_tjct[t.perturbation.window_start_sample
                    :t.perturbation.window_end_sample]
         for t in perturbed
-    ])  # (n_trials, M)
+    ]))  # (n_trials, M)
 
     fig, axes = plt.subplots(
         nrows=len(spec) + 1, ncols=1,
@@ -344,7 +347,7 @@ def build_with_perturbation_figure(
     pert_deg = pert_traj * RAD_TO_DEG
     _plot_band(ax_pert, t_ms, pert_deg.mean(axis=0), pert_deg.std(axis=0),
                f"perturbation (n={len(perturbed)} trials)", "tab:orange")
-    ax_pert.set_ylabel("Hexapod angle\n[deg]")
+    ax_pert.set_ylabel("Hexapod angle\n(magnitude) [deg]")
     ax_pert.set_xlabel("Time relative to onset [ms]")
     ax_pert.axvline(0, color="k", lw=0.5, ls="--", alpha=0.5)
     ax_pert.grid(True, alpha=0.3)
@@ -386,8 +389,13 @@ def build_full_stance_figure(
          lambda t: t.foot_alpha_jcs[:, DF_AXIS]),
         ("Ankle torque", "N·m", 1.0,
          lambda t: -getattr(t, tau_attr)[:, DF_AXIS] * NMM_TO_NM),
-        ("Hexapod angle", "deg", RAD_TO_DEG,
-         lambda t: t.hex_tjct),
+        # Magnitude, not signed value: `hex_tjct` is the platform rotation
+        # projected onto a session-fixed global axis, so trials walked in
+        # opposite directions carry opposite signs even though the platform
+        # drives the ankle the same way in both. Averaging the signed value
+        # would cancel the two directions and pin the mean near zero.
+        ("Hexapod angle (magnitude)", "deg", RAD_TO_DEG,
+         lambda t: np.abs(t.hex_tjct)),
     ]
 
     fig, axes = plt.subplots(
