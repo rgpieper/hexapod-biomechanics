@@ -291,7 +291,11 @@ def _load_ankle_markers_static(
     session_config: SessionConfig,
     side: str,
 ) -> dict[str, npt.NDArray]:
-    """Load all 10 ankle joint markers (7 single + 3 cluster) for one side."""
+    """Load all 10 ankle joint markers (7 single + 3 cluster) for one side.
+
+    The returned `shank_cluster` is the TRACKING set: the 3 cluster markers
+    plus the lateral malleolus (see inline comment below).
+    """
     resolved = session_config.ankle_marker_labels(side)
     single_roles = (
         "medial_malleolus", "lateral_malleolus",
@@ -323,7 +327,18 @@ def _load_ankle_markers_static(
     out: dict[str, npt.NDArray] = {
         role: markers[:, i, :] for i, role in enumerate(single_roles)
     }
-    out["shank_cluster"] = markers[:, len(single_roles):, :]
+    # The shank is TRACKED by the cluster plus the lateral malleolus. LM belongs
+    # to the shank anatomically and sits ~300 mm from the cluster triad, which
+    # spans only ~36 mm; orientation error scales as atan(jitter / baseline), so
+    # the longer lever arm cuts jitter-driven wobble substantially. This does not
+    # change LM's separate anatomical role in defining the malleolar axis.
+    # PROVISIONAL: hardcoded pending a per-segment tracking-marker list in
+    # SessionConfig. See isolation-method-validation.md.
+    lm_idx = single_roles.index("lateral_malleolus")
+    out["shank_cluster"] = np.concatenate(
+        [markers[:, len(single_roles):, :], markers[:, lm_idx:lm_idx + 1, :]],
+        axis=1,
+    )
     return out
 
 
@@ -517,7 +532,11 @@ def compute_trial_intermediates(
     resolved = session_config.ankle_marker_labels(side)
     foot_roles = ("calcaneus", "first_metatarsal", "fifth_metatarsal")
     foot_labels = [resolved[r] for r in foot_roles]
-    shank_cluster_labels = resolved["shank_cluster"]
+    # Shank tracking markers = cluster + lateral malleolus; see the matching
+    # comment in `_load_side_markers` for why, and keep the two in the same
+    # order so the static neutral shape corresponds index-for-index.
+    shank_cluster_labels = (resolved["shank_cluster"]
+                            + [resolved["lateral_malleolus"]])
     hex_labels = session_config.hexapod_marker_labels()
 
     foot_points = spec.trial_data.get_points(foot_labels)
