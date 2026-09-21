@@ -19,6 +19,10 @@ from scipy.constants import g
 from scipy.interpolate import interp1d
 
 from hexapod_biomechanics.config import (
+    PERT_POST_WINDOW_MS,
+    PERT_PRE_THRESHOLD_MS,
+    PERT_PRE_WINDOW_MS,
+    PERT_THRESHOLD_DEG,
     STANCE_GAP_BRIDGE_S,
     SessionConfig,
     accel_analog_pairs,
@@ -494,7 +498,7 @@ def compute_trial_intermediates(
     spec: TrialSpec,
     force_model: BasicMLP,
     force_correction_step_size: int = 50,
-    pert_threshold_deg: float = 1.0,
+    pert_threshold_deg: float = PERT_THRESHOLD_DEG,
     terminal_window_ms: tuple[float, float] = (150.0, 500.0),
 ) -> TrialIntermediates:
     """Run force correction + kinematics + dynamics, returning the full bundle.
@@ -687,10 +691,10 @@ def process_trial(
     spec: TrialSpec,
     force_model: BasicMLP,
     force_correction_step_size: int = 50,
-    pert_threshold_deg: float = 1.0,
-    pert_pre_threshold_ms: float = 46.0,
-    pert_pre_window_ms: float = 25.0,
-    pert_post_window_ms: float = 100.0,
+    pert_threshold_deg: float = PERT_THRESHOLD_DEG,
+    pert_pre_threshold_ms: float = PERT_PRE_THRESHOLD_MS,
+    pert_pre_window_ms: float = PERT_PRE_WINDOW_MS,
+    pert_post_window_ms: float = PERT_POST_WINDOW_MS,
     terminal_window_ms: tuple[float, float] = (150.0, 500.0),
     delsys_path: Optional[Path] = None,
 ) -> TrialResult:
@@ -904,7 +908,13 @@ def _compute_perturbation_info(
     pert_pre_window_ms: float,
     pert_post_window_ms: float,
 ) -> PerturbationInfo:
-    """Detect perturbation onset/window and measure axis deviation from ankle."""
+    """Detect perturbation onset/window and measure axis deviation from ankle.
+
+    Onset is the `pert_threshold_deg` crossing of the platform angle, backed
+    off by `pert_pre_threshold_ms` to land at the (sub-noise-floor) start of
+    the ramp; see the `PERT_*` constants in `config.py` for the calibration
+    behind those numbers.
+    """
     threshold_rad = np.radians(pert_threshold_deg)
     i_thresh = find_pert_thresh(hex_tjct=hex_stance_tjct, thresh=threshold_rad)
 
@@ -937,10 +947,10 @@ def _compute_perturbation_info(
 
 def perturbation_window_slice(
     inter: TrialIntermediates,
-    pert_threshold_deg: float = 1.0,
-    pert_pre_threshold_ms: float = 46.0,
-    pert_pre_window_ms: float = 25.0,
-    pert_post_window_ms: float = 100.0,
+    pert_threshold_deg: float = PERT_THRESHOLD_DEG,
+    pert_pre_threshold_ms: float = PERT_PRE_THRESHOLD_MS,
+    pert_pre_window_ms: float = PERT_PRE_WINDOW_MS,
+    pert_post_window_ms: float = PERT_POST_WINDOW_MS,
 ) -> slice:
     """Derive the full-capture slice covering the perturbation window.
 

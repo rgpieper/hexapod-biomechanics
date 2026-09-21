@@ -94,6 +94,33 @@ FILT_POLY = 4                   # sav-gol polynomial order
 # magnitude longer than this.
 STANCE_GAP_BRIDGE_S = 0.02      # [s]
 
+# Perturbation onset detection and analysis window.
+#
+# The platform angle `hex_tjct` carries a 0.03-0.09 deg DC offset with
+# ~0.015 deg noise, so onset cannot be detected by a small threshold -- a
+# 0.05-0.1 deg threshold fires hundreds of ms early. Instead a threshold well
+# clear of that floor (PERT_THRESHOLD_DEG) is crossed, and the onset is placed
+# a fixed offset (PERT_PRE_THRESHOLD_MS) earlier.
+#
+# That offset is calibrated against the commanded ramp: the platform rises at
+# a near-constant ~750 deg/s^2, so sqrt(|angle|) is linear in time and can be
+# extrapolated back to zero. Measured over ~400 perturbed trials (C0111085 and
+# SE013026, both stance percentages), the extrapolated motion onset sits
+# 48-51 ms before the 1 deg crossing (sd 1-3 ms, p95 52 ms).
+# 55 ms therefore lands slightly EARLY in essentially every trial, which is
+# the intended bias: a few ms of pre-motion baseline is harmless, whereas a
+# late onset truncates the leading edge of the response.
+#
+# The window runs from the onset itself (no pre-onset samples -- they carry no
+# perturbation information and are the re-zeroing anchor) to
+# PERT_POST_WINDOW_MS after it. The ramp reaches 95% of its 2 deg plateau
+# ~37 ms after the crossing (~86 ms after onset), so 100 ms covers the full
+# ramp plus a short plateau hold.
+PERT_THRESHOLD_DEG = 1.0        # platform angle threshold for detection [deg]
+PERT_PRE_THRESHOLD_MS = 55.0    # threshold crossing -> onset backoff [ms]
+PERT_PRE_WINDOW_MS = 0.0        # pre-onset window duration [ms]
+PERT_POST_WINDOW_MS = 100.0     # post-onset window duration [ms]
+
 # Regex patterns used during auto-detection.
 _KISTLER_RAW_DESC_RE = re.compile(r"^Kistler Force Plate [\d.]+::Raw \[(\d+)\]$")
 _ACCEL_ACCEL_DESC_RE = re.compile(r"^Analog Accelerometer::Acceleration \[(\d+),\d\]$")

@@ -42,8 +42,10 @@ class IsolatedPerturbation:
 
     All signal arrays span the perturbation window (length M =
     pre_window + post_window samples, identical across iterations and
-    trials). Time is relative to the perturbation onset: `time[0]` is
-    negative (pre-onset), `time` crosses zero at the onset sample.
+    trials). Time is relative to the perturbation onset. With the default
+    zero-length pre-onset window `time[0]` is 0; a nonzero
+    `pert_pre_window_ms` makes `time[0]` negative and `time` crosses zero
+    at the onset sample.
     """
     # identity / timing
     iteration: int                       # 0-based bootstrap iteration index
