@@ -63,7 +63,7 @@ Run this once per subject — use the same value across all sessions.
 
 ```bash
 uv run python scripts/measure_body_mass.py \
-    subjects/RP081721/11082025/raw_data/static_01.c3d
+    subjects/RP041026/15102026/raw_data/static_01.c3d
 ```
 
 ### 1. Generate session config
@@ -73,8 +73,8 @@ accelerometer mode) from a sample c3d and write `session.toml`.
 
 ```bash
 uv run python scripts/build_config.py \
-    subjects/RP081721/11082025 \
-    --subject-id RP081721 --body-mass 75.2 --sex m
+    subjects/RP041026/15102026 \
+    --subject-id RP041026 --body-mass 75.2 --sex m
 ```
 
 **Review the generated file** before proceeding:
@@ -88,7 +88,7 @@ inertial artifacts, compute ankle kinematics (ISB joint coordinate system) and
 inverse dynamics (Newton-Euler), then write one HDF5 per condition.
 
 ```bash
-uv run python scripts/process_session.py subjects/RP081721/11082025
+uv run python scripts/process_session.py subjects/RP041026/15102026
 ```
 
 Output: `conditions/{side}_nom.h5`, `conditions/{side}_pert_{pct}.h5`
@@ -100,7 +100,7 @@ subtraction (Stage 2) and fit the impedance model (Stage 3).
 
 ```bash
 uv run python scripts/fit_impedance.py \
-    subjects/RP081721/11082025 right 50
+    subjects/RP041026/15102026 right 50
 ```
 
 This produces two figures (interactive by default) and prints impedance parameters
@@ -117,13 +117,13 @@ This produces two figures (interactive by default) and prints impedance paramete
 ```bash
 # Animate a single trial (kinematics, GRF, perturbation tracking, or demo)
 uv run python scripts/animate_trial.py \
-    subjects/RP081721/11082025 \
+    subjects/RP041026/15102026 \
     hex_20250811_trip12_pert_50pct_fwd \
     --which demo --scope stance
 
 # Plot Stage 2 isolation results without fitting impedance
 uv run python scripts/plot_isolated.py \
-    subjects/RP081721/11082025 right 50
+    subjects/RP041026/15102026 right 50
 ```
 
 ## Package Modules

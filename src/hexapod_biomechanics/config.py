@@ -104,8 +104,8 @@ STANCE_GAP_BRIDGE_S = 0.02      # [s]
 #
 # That offset is calibrated against the commanded ramp: the platform rises at
 # a near-constant ~750 deg/s^2, so sqrt(|angle|) is linear in time and can be
-# extrapolated back to zero. Measured over ~400 perturbed trials (C0111085 and
-# SE013026, both stance percentages), the extrapolated motion onset sits
+# extrapolated back to zero. Measured over ~400 perturbed trials (2 subjects x
+# 2 sessions, both stance percentages), the extrapolated motion onset sits
 # 48-51 ms before the 1 deg crossing (sd 1-3 ms, p95 52 ms).
 # 55 ms therefore lands slightly EARLY in essentially every trial, which is
 # the intended bias: a few ms of pre-motion baseline is harmless, whereas a
