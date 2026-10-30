@@ -178,6 +178,16 @@ def fit_impedance(
         if filt_win % 2 == 0:
             filt_win += 1
         dt = 1.0 / fs
+        # The isolated angle must be padded by at least the filter half-width
+        # so every in-window sample gets a full (non-edge) filter window.
+        pad = isolated[0].pad_frames
+        if pad < filt_win // 2:
+            raise ValueError(
+                f"Isolated angle padded by {pad} samples, but the "
+                f"{filt_win}-sample sav-gol window needs >= {filt_win // 2}. "
+                f"Re-run bootstrap_isolate or shorten filt_window_duration."
+            )
+        crop = slice(pad, pad + n_samples)  # padded span -> analysis window
 
     # Pre-allocate output arrays.
     K_arr = np.empty(n_iter)
@@ -203,19 +213,22 @@ def fit_impedance(
         else:
             # STD / GONIO_STD: apply single sav-gol pass to raw isolated angle.
             # The only difference is the angle source (Vicon vs goniometer).
-            raw_angle = iso.alpha if isolation_path == "std" else iso.gonio_df_pf
+            # Filter the padded span, then crop to the window, so no window
+            # sample falls in the filter's edge (polynomial-fit) region.
+            raw_angle = (iso.alpha_padded if isolation_path == "std"
+                         else iso.gonio_df_pf_padded)
             theta_i = savgol_filter(
                 raw_angle, window_length=filt_win, polyorder=filt_poly,
                 deriv=0, delta=dt, axis=0,
-            )
+            )[crop]
             omega_i = savgol_filter(
                 raw_angle, window_length=filt_win, polyorder=filt_poly,
                 deriv=1, delta=dt, axis=0,
-            )
+            )[crop]
             alpha_i = savgol_filter(
                 raw_angle, window_length=filt_win, polyorder=filt_poly,
                 deriv=2, delta=dt, axis=0,
-            )
+            )[crop]
 
         # --- Torque: convert N*mm -> Nm, negate (sign convention) ---
         tau_attr = "tau_full" if dynamics == "full" else "tau_static"

@@ -17,6 +17,14 @@ If every input trial carries a Delsys payload with the side-matched
 `gonio_<side>_df_pf` channel, that channel is isolated alongside the
 Vicon angles. All-or-none: mixed coverage raises so a config slip
 doesn't silently drop the signal.
+
+The raw angles that get differentiated *after* subtraction (`alpha` for
+the STD path, `gonio_df_pf` for GONIO_STD) are also isolated over a padded
+span: the window plus `pad_frames` samples on each side. A sav-gol filter
+run on the bare window would fall back to edge polynomial fits over most
+of it (the filter is nearly as long as the window), producing
+discontinuities in the derivatives. Filtering the padded span and then
+cropping makes every in-window sample a true convolution.
 """
 
 from dataclasses import dataclass
@@ -72,6 +80,10 @@ class IsolatedPerturbation:
     n_nominal_averaged: int              # nominal trials averaged (all of them)
     # optional Delsys-derived signals (None when no trial carries Delsys data)
     gonio_df_pf: Optional[npt.NDArray] = None  # (M,) isolated DF/PF angle [rad]
+    # padded spans for post-subtraction filtering; window is [pad:pad + M]
+    pad_frames: int = 0                        # samples added on each side
+    alpha_padded: Optional[npt.NDArray] = None        # (M + 2*pad,) [rad]
+    gonio_df_pf_padded: Optional[npt.NDArray] = None  # (M + 2*pad,) [rad]
 
 
 # ---------------------------------------------------------------------------
@@ -108,13 +120,14 @@ def bootstrap_isolate(
 
     Raises:
         ValueError: If inputs are empty, mixed across sides/sampling rates,
-            have inconsistent perturbation windows, or if any nominal trial
-            is too short to cover the mean-onset-centered window.
+            have inconsistent perturbation windows, or if any trial is too
+            short to cover the (padded) window.
     """
     rng = np.random.default_rng(seed)
     fs, window_len, pre_frames = _validate_and_extract_window(
         perturbed_trials, nominal_trials
     )
+    pad = savgol_half_window(fs)  # filter half-width, padded on each side
     n_pert = len(perturbed_trials)
     n_sample = round(n_pert * sample_fraction)
     if n_sample < 1:
@@ -136,7 +149,9 @@ def bootstrap_isolate(
     time = (np.arange(window_len) - pre_frames) / fs
 
     # Pre-stack perturbed-window signals per trial for fast subsampling.
-    pert_stacks = _stack_perturbed_windows(perturbed_trials, gonio_key if has_gonio else None)
+    pert_stacks = _stack_perturbed_windows(
+        perturbed_trials, pad, gonio_key if has_gonio else None,
+    )
 
     isolated: list[IsolatedPerturbation] = []
     for it in range(n_iterations):
@@ -165,15 +180,18 @@ def bootstrap_isolate(
         nom_start = mean_onset - pre_frames
         nom_end = nom_start + window_len
         nom_avg = _average_nominal_window(
-            nominal_trials, nom_start, nom_end,
+            nominal_trials, nom_start, nom_end, pad,
             gonio_key=gonio_key if has_gonio else None,
         )
 
         # Optional gonio isolation: subtract bootstrap-averaged perturbed
         # gonio minus all-trial-averaged nominal gonio, mirroring Vicon angles.
         gonio_isolated: Optional[npt.NDArray] = None
+        gonio_padded: Optional[npt.NDArray] = None
         if has_gonio:
             gonio_isolated = pert_avg["gonio_df_pf"] - nom_avg["gonio_df_pf"]
+            gonio_padded = (pert_avg["gonio_df_pf_padded"]
+                            - nom_avg["gonio_df_pf_padded"])
 
         # Isolate: independent subtraction per signal.
         isolated.append(IsolatedPerturbation(
@@ -201,9 +219,35 @@ def bootstrap_isolate(
             mean_onset_stance_fraction=mean_phase,
             n_nominal_averaged=len(nominal_trials),
             gonio_df_pf=gonio_isolated,
+            pad_frames=pad,
+            alpha_padded=pert_avg["alpha_padded"] - nom_avg["alpha_padded"],
+            gonio_df_pf_padded=gonio_padded,
         ))
 
     return isolated
+
+
+def savgol_half_window(
+    fs: float,
+    filt_window_duration: float = FILT_WINDOW_DURATION_S,
+) -> int:
+    """Half-width [samples] of the sav-gol window used for differentiation.
+
+    Uses the same window-length rule as `impedance.fit_impedance` (rounded
+    up to odd). Padding a signal by this many samples on each side lets
+    every original sample sit at the center of a full filter window.
+
+    Args:
+        fs: Sampling rate [Hz].
+        filt_window_duration: Savitzky-Golay window length [s].
+
+    Returns:
+        `window_length // 2`.
+    """
+    win = int(fs * filt_window_duration)
+    if win % 2 == 0:
+        win += 1
+    return win // 2
 
 
 def differentiate_isolated_angle(
@@ -314,9 +358,10 @@ def select_nominal_trials(
 
     p0 = perturbed[0].perturbation
     post_frames = p0.window_end_sample - p0.onset_sample
+    pad = savgol_half_window(perturbed[0].fs_hz)  # post-subtraction filter pad
     onsets = [t.perturbation.onset_sample for t in perturbed]
     i_max = int(np.argmax(onsets))
-    required = onsets[i_max] + post_frames
+    required = onsets[i_max] + post_frames + pad
 
     return NominalSelection(
         required=required,
@@ -342,7 +387,8 @@ def describe_nominal_selection(
     total = len(sel.kept) + len(sel.dropped)
     lines = [
         f"Nominal length filter: need >= {sel.required} samples "
-        f"(latest perturbed onset {sel.setter_onset} + post-onset window)."
+        f"(latest perturbed onset {sel.setter_onset} + post-onset window "
+        f"+ filter pad)."
     ]
     if sel.setter_onset > 2 * sel.median_onset:
         lines.append(
@@ -450,27 +496,41 @@ def _validate_and_extract_window(
 
 def _stack_perturbed_windows(
     perturbed: Sequence[TrialResult],
+    pad: int,
     gonio_key: Optional[str] = None,
 ) -> dict[str, npt.NDArray]:
     """Stack each perturbed trial's windowed signals into (n_trials, M, ...) arrays.
 
     Output dict is keyed by field name. Both raw and filtered angle variants
-    are always included alongside the non-angle fields. When `gonio_key` is
-    provided, the corresponding `delsys.channels[gonio_key].v` is sliced
-    with the perturbation window and stacked under key `"gonio_df_pf"`.
+    are always included alongside the non-angle fields, plus `"alpha_padded"`
+    sliced `pad` samples wider on each side. When `gonio_key` is provided,
+    the corresponding `delsys.channels[gonio_key].v` is stacked under
+    `"gonio_df_pf"` (window) and `"gonio_df_pf_padded"` (padded window).
 
     Pre-stacking once avoids redoing the slicing inside the bootstrap loop.
     """
-    stacks: dict[str, list[npt.NDArray]] = {k: [] for k in _ALL_FIELDS}
+    keys = [*_ALL_FIELDS, "alpha_padded"]
     if gonio_key is not None:
-        stacks["gonio_df_pf"] = []
+        keys += ["gonio_df_pf", "gonio_df_pf_padded"]
+    stacks: dict[str, list[npt.NDArray]] = {k: [] for k in keys}
     for t in perturbed:
-        sl = slice(t.perturbation.window_start_sample,
-                   t.perturbation.window_end_sample)
+        start = t.perturbation.window_start_sample
+        end = t.perturbation.window_end_sample
+        if start - pad < 0 or end + pad > len(t.alpha):
+            raise ValueError(
+                f"Perturbed trial {t.trial_name!r}: padded window "
+                f"[{start - pad}:{end + pad}] out of bounds for stance "
+                f"length {len(t.alpha)}."
+            )
+        sl = slice(start, end)
+        sl_pad = slice(start - pad, end + pad)
         for field in _ALL_FIELDS:
             stacks[field].append(getattr(t, field)[sl])
+        stacks["alpha_padded"].append(t.alpha[sl_pad])
         if gonio_key is not None:
-            stacks["gonio_df_pf"].append(t.delsys.channels[gonio_key].v[sl])
+            gonio = t.delsys.channels[gonio_key].v
+            stacks["gonio_df_pf"].append(gonio[sl])
+            stacks["gonio_df_pf_padded"].append(gonio[sl_pad])
     return {k: np.stack(v, axis=0) for k, v in stacks.items()}
 
 
@@ -478,32 +538,38 @@ def _average_nominal_window(
     nominal: Sequence[TrialResult],
     start: int,
     end: int,
+    pad: int,
     gonio_key: Optional[str] = None,
 ) -> dict[str, npt.NDArray]:
     """Slice [start:end] from each nominal trial and average across trials.
 
     `start`/`end` are stance-relative indices. Bounds are re-checked here
     because the slice depends on the per-iteration mean onset, which isn't
-    known during up-front validation. When `gonio_key` is provided the
-    side-matched goniometer channel is also sliced and averaged under key
-    `"gonio_df_pf"`.
+    known during up-front validation. `"alpha_padded"` is sliced `pad`
+    samples wider on each side. When `gonio_key` is provided the
+    side-matched goniometer channel is also averaged under `"gonio_df_pf"`
+    and `"gonio_df_pf_padded"`.
     """
-    fields = list(_ALL_FIELDS)
+    fields = [*_ALL_FIELDS, "alpha_padded"]
     if gonio_key is not None:
-        fields.append("gonio_df_pf")
+        fields += ["gonio_df_pf", "gonio_df_pf_padded"]
     avg: dict[str, list[npt.NDArray]] = {k: [] for k in fields}
     for nt in nominal:
-        if start < 0 or end > len(nt.alpha):
+        if start - pad < 0 or end + pad > len(nt.alpha):
             raise ValueError(
-                f"Nominal trial {nt.trial_name!r}: requested window "
-                f"[{start}:{end}] out of bounds for stance length "
+                f"Nominal trial {nt.trial_name!r}: requested padded window "
+                f"[{start - pad}:{end + pad}] out of bounds for stance length "
                 f"{len(nt.alpha)} (mean perturbed onset too near stance edges)."
             )
         sl = slice(start, end)
+        sl_pad = slice(start - pad, end + pad)
         for field in _ALL_FIELDS:
             avg[field].append(getattr(nt, field)[sl])
+        avg["alpha_padded"].append(nt.alpha[sl_pad])
         if gonio_key is not None:
-            avg["gonio_df_pf"].append(nt.delsys.channels[gonio_key].v[sl])
+            gonio = nt.delsys.channels[gonio_key].v
+            avg["gonio_df_pf"].append(gonio[sl])
+            avg["gonio_df_pf_padded"].append(gonio[sl_pad])
     return {k: np.mean(np.stack(v, axis=0), axis=0) for k, v in avg.items()}
 
 
